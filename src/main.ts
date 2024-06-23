@@ -1,0 +1,30 @@
+import { createApp } from 'vue'
+import App from './App.vue'
+
+// Vuetify
+import 'vuetify/styles'
+import { createVuetify } from 'vuetify'
+import * as components from 'vuetify/components'
+import * as directives from 'vuetify/directives'
+
+//router
+import router from './router/router'
+
+
+// store
+import { createPinia } from 'pinia'
+import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
+
+const pinia = createPinia()
+pinia.use(piniaPluginPersistedstate)
+
+const app = createApp(App)
+const vuetify = createVuetify({
+    components,
+    directives,
+})
+
+app.use(vuetify)
+    .use(pinia)
+    .use(router)
+    .mount('#app')
