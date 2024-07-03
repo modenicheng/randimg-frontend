@@ -15,8 +15,25 @@ const routes = [
         component: () => import("../views/Home.vue"),
         children: [
             {
+                path: '',
+                name: 'index',
+                component: () => import("../views/Index.vue"),
+                meta: {
+                    navigator: true,
+                    title: '主页'
+                }
+            },
+            {
+                path: 'random-image',
+                name: 'random-image',
+                component: () => import("../views/RandomImage.vue"),
+                meta: {
+                    navigator: true,
+                    title: '随机图片',
+                }
+            },
+            {
                 path: 'image/:id',
-                name: 'image',
                 component: () => import("../views/Image.vue"),
                 meta: {
                     navigator: false
@@ -33,7 +50,7 @@ const routes = [
             }
         ]
     },
-    { path: '/:pathMatch(.*)*', name: 'NotFound', component: () => import('../components/HelloWorld.vue') },
+    { path: '/:pathMatch(.*)*', name: 'NotFound', component: () => import('../views/404.vue') },
 
 ]
 const router = createRouter({

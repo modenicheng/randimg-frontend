@@ -1,8 +1,8 @@
 <script setup>
-import { ref } from 'vue';
+import { onMounted, onUnmounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import siLog from 'si-log'
-import Axios from '../axios/axois';
+import Axios from '../axios/axios';
 import { useUserStore } from '../store/store';
 
 const store = useUserStore()
@@ -56,14 +56,13 @@ let er = ref(false)
             <v-form v-model="valid" :disabled="isLoading">
                 <v-col>
                     <v-text-field :rules="rules" v-model="data.username" label="Username" required></v-text-field>
-                    <v-text-field type="password" :rules="rules" v-model="data.password" label="Password"
-                        required></v-text-field>
+                    <v-text-field type="password" :rules="rules" v-model="data.password" label="Password" @keyup.enter="submit()">
+                        </v-text-field>
                     <v-btn @click="submit()" :disabled="isLoading || !valid" width="100%">SUBMIT</v-btn>
                     <v-alert variant="tonal" v-if="er" type="error" style="margin: 1rem 0 0" text="用户名或密码错误！">
                     </v-alert>
                 </v-col>
             </v-form>
-
         </v-card>
     </div>
 </template>
