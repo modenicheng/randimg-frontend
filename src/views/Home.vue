@@ -3,7 +3,13 @@ import { useRouter, useRoute } from "vue-router";
 import { ref } from "vue";
 import { routes } from "../router/router";
 import Axios from "../axios/axios";
+import { useTheme } from 'vuetify'
+import { useUserStore } from "../store/store";
+import { mdiThemeLightDark } from '@mdi/js';
 
+const icons = {mdiThemeLightDark}
+
+const store = useUserStore()
 const router = useRouter();
 const route = useRoute();
 let navList = ref([]);
@@ -16,10 +22,24 @@ for (let item of routes) {
     }
   }
 }
+
+const theme = useTheme()
+theme.global.name.value = store.user.theme
+const toggleTheme = () => {
+  theme.global.name.value = theme.global.current.value.dark ? 'light' : 'dark'
+  store.setTheme(theme.global.name.value)
+}
+
 </script>
 <template>
   <v-layout class="rounded rounded-md">
-    <v-app-bar title="随机图片API"></v-app-bar>
+    <v-app-bar title="随机图片API">
+      <v-spacer></v-spacer>
+      <v-btn icon @click="toggleTheme()">
+        <v-icon :icon="mdiThemeLightDark"></v-icon>
+      </v-btn>
+
+    </v-app-bar>
 
     <v-navigation-drawer>
       <v-list>

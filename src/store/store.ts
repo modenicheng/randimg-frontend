@@ -5,8 +5,14 @@ const useUserStore = defineStore('user', {
         return {
             user: {
                 username: null,
-                token: null
+                token: null,
+                theme: 'light',
             }
+        }
+    },
+    actions: {
+        setTheme (theme: string) {
+            this.user.theme = theme
         }
     },
     persist: true,

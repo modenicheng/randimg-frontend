@@ -1,9 +1,16 @@
 <script setup lang="ts">
 import Axios from "../axios/axios";
-import { computed, onMounted, ref, watch } from "vue";
+import { onMounted, ref } from "vue";
 
+interface Author {
+  id: number;
+  name: string;
+  platform: string;
+  platform_id: number;
+}
 interface imageList {
   id: number;
+  author: Author;
   src: string;
   title: string;
   source_id: number;
@@ -101,44 +108,56 @@ const showDetail = (imageId: number) => {
   overlay.value = true;
   Axios.get(`/image/${imageId}`).then((res) => {
     imageDetailData.value = res.data;
-    if (imageDetailData.value.aspect_ratio < 0.6) {
-      imgShowHeight.value = 38 * parseFloat(getComputedStyle(document.documentElement).fontSize)
-      imgShowWidth.value = imgShowHeight.value * imageDetailData.value.aspect_ratio
+    if (imageDetailData.value.aspect_ratio < 0.605) {
+      imgShowHeight.value = 0.8 * window.innerHeight;
+      imgShowWidth.value =
+        imgShowHeight.value * imageDetailData.value.aspect_ratio;
+    }
+    // else if (imageDetailData.value.aspect_ratio > 0.8 && imageDetailData.value.aspect_ratio <= 1.35) {
+    //   imgShowWidth.value = imgWidth.value / 30 * 40;
+    //   imgShowHeight.value =
+    //     imgShowWidth.value / imageDetailData.value.aspect_ratio;
+    // } 
+    else if (imageDetailData.value.aspect_ratio < 1.35) {
+      imgShowWidth.value = 0.3 * window.innerWidth;
+      imgShowHeight.value = imgShowWidth.value / imageDetailData.value.aspect_ratio;
     } else {
-      imgShowWidth.value = imgWidth.value
-      imgShowHeight.value = imgShowWidth.value / imageDetailData.value.aspect_ratio
+      imgShowWidth.value = 0.6 * window.innerWidth;
+      imgShowHeight.value = imgShowWidth.value / imageDetailData.value.aspect_ratio;
     }
   });
-
 };
 const overlayClosed = () => {
   imageDetailData.value = null;
-}
-let imgShowWidth = ref()
-let imgShowHeight = ref()
-let imgWidth = computed(() => {
-  return 25 * parseFloat(getComputedStyle(document.documentElement).fontSize)
-})
-const imgRef = ref()
+};
+let imgShowWidth = ref();
+let imgShowHeight = ref();
+
+const toUrl = (url: string) => {
+  window.open(url, "_blank");
+};
 </script>
 <template>
-  <v-overlay v-model="overlay" class="overlay" @after-leave="overlayClosed()">
-    <div class="container-cols">
-      <div v-if="imageDetailData">
+  <v-overlay z-index="10000" v-model="overlay" class="overlay" @after-leave="overlayClosed()">
+    <div class="container-cols" v-if="imageDetailData"
+      :style="{ gridTemplateColumns: imageDetailData.aspect_ratio >= 1.35 ? '1fr' : 'auto 1fr' }">
+      <div>
         <v-img :lazy-src="imageDetailData.src + '/scale_to_1080x1080'" :width="imgShowWidth" :height="imgShowHeight"
-          ref="imgRef" :src="imageDetailData.src" @load="imageDetailData.loaded = true">
+          :src="imageDetailData.src" @load="imageDetailData.loaded = true">
           <template v-slot:placeholder v-if="!imageDetailData.loaded">
             <div class="d-flex align-center justify-center fill-height">
               <v-progress-circular color="blue-lighten-4" indeterminate></v-progress-circular>
             </div>
           </template>
         </v-img>
-        <div class="color-container">
+        <div class="color-container"
+          :style="{ gridTemplateColumns: `repeat(${imageDetailData.aspect_ratio < 0.605 ? '5' : '10'}, 1fr)`, height: `${imageDetailData.aspect_ratio < 0.605 ? '4.3rem' : '2rem'}` }">
           <div v-for="color of imageDetailData.colors.colors">
             <v-tooltip location="top" class="color-card" :text="`rgb(${color[0]}, ${color[1]}, ${color[2]})`">
               <template class="color-card" v-slot:activator="{ props }">
-                <v-card class="color-card" v-bind="props"
-                  :style="{ backgroundColor: `rgb(${color[0]}, ${color[1]}, ${color[2]})` }"></v-card>
+                <v-card hover class="color-card" v-bind="props" :style="{
+                  backgroundColor: `rgb(${color[0]}, ${color[1]}, ${color[2]})`,
+                }"></v-card>
               </template>
             </v-tooltip>
           </div>
@@ -146,17 +165,35 @@ const imgRef = ref()
       </div>
       <v-card class="info">
         <div class="info" v-if="imageDetailData">
-          <h2>{{ imageDetailData.title }}</h2>
+          <h1>{{ imageDetailData.title }}</h1>
           <div class="tags">
             <v-chip class="tag" v-for="tag of imageDetailData.tags">
-              <div>{{ tag.name }}</div>
-              <!-- <div>{{ tag.translated_name }}</div> -->
+              <div class="tag-info">
+                <div>{{ tag.name }}</div>
+                <div class="extra">{{ tag.translated_name }}</div>
+              </div>
             </v-chip>
           </div>
           <v-divider></v-divider>
-          <div>{{ imageDetailData.author }}</div>
-          <div>{{ imageDetailData.source_url }}</div>
+          <div class="author" style="margin-top: 1rem;">
+            <h3>画师信息 / Author</h3>
+            <div class="name">{{ imageDetailData.author.name }}</div>
+            <div class="platform">{{ imageDetailData.author.platform }}</div>
+            <div>{{ imageDetailData.author.platform_id }}</div>
+            <div class="link" @click="toUrl(`https://www.pixiv.net/users/${imageDetailData.author.platform_id}`)">画师主页 -
+              {{ `https://www.pixiv.net/users/${imageDetailData.author.platform_id}` }}</div>
+          </div>
+          <div style="margin-top: 1rem;" class="origin">
+            <h3>原作信息 / Origin</h3>
+            <div class="link" @click="toUrl(imageDetailData.source_url)">图片源/Source - {{ imageDetailData.source_url }}
+            </div>
+            <div>分辨率/Resolution: {{ imageDetailData.width }}×{{ imageDetailData.height }}</div>
+            <div>宽高比/AspectRatio: {{ imageDetailData.aspect_ratio }}</div>
+          </div>
         </div>
+        <v-card-actions>
+          <v-btn style="font-weight: bold;" @click="toUrl(imageDetailData.src)" text='在新标签页中打开此图像'></v-btn>
+        </v-card-actions>
       </v-card>
     </div>
   </v-overlay>
@@ -165,44 +202,74 @@ const imgRef = ref()
       <v-row no-gutters>
         <v-col>
           <template v-for="image of cols[0]">
-            <v-img class="image" :src="image.src + '/scale_to_1080x1080'" @load="image.loaded = true" :width="colWidth"
-              :height="colWidth / image.aspect_ratio" :style="{
-                backgroundColor: `rgba(${image.primary_color[0]}, ${image.primary_color[1]}, ${image.primary_color[2]}, 0.5)`,
-              }" @click="showDetail(image.id)">
-              <template v-slot:placeholder v-if="!image.loaded">
-                <div class="d-flex align-center justify-center fill-height">
-                  <v-progress-circular color="grey-lighten-4" indeterminate></v-progress-circular>
-                </div>
-              </template>
-            </v-img>
+            <v-hover v-slot="{ isHovering, props }">
+              <v-img v-bind="props" class="image" :src="image.src + '/scale_to_1080x1080'" @load="image.loaded = true"
+                :width="colWidth" :height="colWidth / image.aspect_ratio" :style="{
+                  backgroundColor: `rgba(${image.primary_color[0]}, ${image.primary_color[1]}, ${image.primary_color[2]}, 0.5)`,
+                }" @click="showDetail(image.id)">
+                <template v-slot:placeholder v-if="!image.loaded">
+                  <div class="d-flex align-center justify-center fill-height">
+                    <v-progress-circular color="grey-lighten-4" indeterminate></v-progress-circular>
+                  </div>
+                </template>
+                <v-overlay :model-value="isHovering" class="img-overlay" contained>
+                  <div class="inner-container" :style="{width: `${colWidth}px`}">
+                    <div class="title">{{ image.title }}</div>
+                    <div class="id">{{ image.source_id }}</div>
+                    <div>{{ image.author.name }}</div>
+                    <div>#{{ image.id }}</div>
+                  </div>
+                </v-overlay>
+              </v-img>
+            </v-hover>
           </template>
         </v-col>
         <v-col>
           <template v-for="image of cols[1]">
-            <v-img class="image" :src="image.src + '/scale_to_1080x1080'" @load="image.loaded = true" :width="colWidth"
-              :height="colWidth / image.aspect_ratio" :style="{
-                backgroundColor: `rgba(${image.primary_color[0]}, ${image.primary_color[1]}, ${image.primary_color[2]}, 0.5)`,
-              }" @click="showDetail(image.id)">
-              <template v-slot:placeholder v-if="!image.loaded">
-                <div class="d-flex align-center justify-center fill-height">
-                  <v-progress-circular color="grey-lighten-4" indeterminate></v-progress-circular>
-                </div>
-              </template>
-            </v-img>
+            <v-hover v-slot="{ isHovering, props }">
+              <v-img v-bind="props" class="image" :src="image.src + '/scale_to_1080x1080'" @load="image.loaded = true"
+                :width="colWidth" :height="colWidth / image.aspect_ratio" :style="{
+                  backgroundColor: `rgba(${image.primary_color[0]}, ${image.primary_color[1]}, ${image.primary_color[2]}, 0.5)`,
+                }" @click="showDetail(image.id)">
+                <template v-slot:placeholder v-if="!image.loaded">
+                  <div class="d-flex align-center justify-center fill-height">
+                    <v-progress-circular color="grey-lighten-4" indeterminate></v-progress-circular>
+                  </div>
+                </template>
+                <v-overlay :model-value="isHovering" class="img-overlay" contained>
+                  <div class="inner-container" :style="{width: `${colWidth}px`}">
+                    <div class="title">{{ image.title }}</div>
+                    <div class="id">{{ image.source_id }}</div>
+                    <div>{{ image.author.name }}</div>
+                    <div>#{{ image.id }}</div>
+                  </div>
+                </v-overlay>
+              </v-img>
+            </v-hover>
           </template>
         </v-col>
         <v-col>
           <template v-for="image of cols[2]">
-            <v-img class="image" :src="image.src + '/scale_to_1080x1080'" @load="image.loaded = true" :width="colWidth"
-              :height="colWidth / image.aspect_ratio" :style="{
-                backgroundColor: `rgba(${image.primary_color[0]}, ${image.primary_color[1]}, ${image.primary_color[2]}, 0.5)`,
-              }" @click="showDetail(image.id)">
-              <template v-slot:placeholder v-if="!image.loaded">
-                <div class="d-flex align-center justify-center fill-height">
-                  <v-progress-circular color="grey-lighten-4" indeterminate></v-progress-circular>
-                </div>
-              </template>
-            </v-img>
+            <v-hover v-slot="{ isHovering, props }">
+              <v-img v-bind="props" class="image" :src="image.src + '/scale_to_1080x1080'" @load="image.loaded = true"
+                :width="colWidth" :height="colWidth / image.aspect_ratio" :style="{
+                  backgroundColor: `rgba(${image.primary_color[0]}, ${image.primary_color[1]}, ${image.primary_color[2]}, 0.5)`,
+                }" @click="showDetail(image.id)">
+                <template v-slot:placeholder v-if="!image.loaded">
+                  <div class="d-flex align-center justify-center fill-height">
+                    <v-progress-circular color="grey-lighten-4" indeterminate></v-progress-circular>
+                  </div>
+                </template>
+                <v-overlay content-class="content" :model-value="isHovering" class="img-overlay" contained style="width: 100%;">
+                  <div class="inner-container" :style="{width: `${colWidth}px`}">
+                    <div class="title">{{ image.title }}</div>
+                    <div class="id">{{ image.source_id }}</div>
+                    <div>{{ image.author.name }}</div>
+                    <div>#{{ image.id }}</div>
+                  </div>
+                </v-overlay>
+              </v-img>
+            </v-hover>
           </template>
         </v-col>
       </v-row>
@@ -211,7 +278,6 @@ const imgRef = ref()
       </template>
     </v-infinite-scroll>
   </v-container>
-  <v-pagination></v-pagination>
 </template>
 <style scoped lang="scss">
 .image {
@@ -225,11 +291,39 @@ const imgRef = ref()
 
 .image:hover {
   transform: scale(1.01);
-  filter: brightness(0.8);
+  // filter: brightness(0.8);
 }
 
 .container {
   width: auto;
+}
+
+.img-overlay {
+  display: flex;
+  align-items: flex-end;
+  width: 100%;
+
+  div {
+    width: 100%
+  }
+
+  .content {
+    width: 100% !important;
+  }
+
+  .title {
+    font-size: 1.5rem;
+    font-weight: bold
+  }
+
+  .inner-container {
+    user-select: none;
+    -moz-user-select: none;
+    padding: 0.2rem 0.5rem;
+    width: 100%;
+    color: rgb(var(--v-theme-background));
+    background: linear-gradient(to top, rgba(var(--v-theme-on-surface), 0.8), rgba(var(--v-theme-on-surface), 0));
+  }
 }
 
 .overlay {
@@ -242,20 +336,68 @@ const imgRef = ref()
     display: grid;
     grid-template-columns: auto 1fr;
     gap: 1rem;
+    max-height: 100vh;
+    overflow: auto;
   }
 
   .info {
     min-width: 30rem;
     max-width: 60vw;
-    width: max-content;
+    // width: max-content;
     padding: 1rem;
     height: auto;
+
+    .author {
+      margin: 0.5rem 0;
+
+      div {
+        margin-left: 1.5rem;
+      }
+    }
+
+    .origin {
+      margin: 0.5rem 0;
+
+      div {
+        margin-left: 1.5rem;
+      }
+    }
+
+    .link {
+      cursor: pointer;
+      width: fit-content;
+      transition: all 0.2s;
+      border-radius: 0.2rem;
+      padding: 0 0.4rem;
+      transform: translateX(-0.4rem);
+    }
+
+    .link:hover {
+      background-color: rgba(130, 130, 130, 0.1)
+    }
+
+    .link:visited {
+      text-decoration: none;
+    }
 
     .tags {
       width: 100%;
 
       .tag {
         margin: 0 0.5rem 0.5rem 0;
+        border-radius: 0.3rem;
+        height: 3rem;
+
+        .tag-info {
+          display: flex;
+          align-items: center;
+          flex-direction: column;
+
+          .extra {
+            font-size: 0.7rem;
+            color: rgba(130, 130, 130, 0.9);
+          }
+        }
       }
     }
   }
@@ -263,15 +405,13 @@ const imgRef = ref()
   .color-container {
     .color-card {
       width: 100%;
-      height: 100%
+      height: 100%;
     }
 
-    margin: 1rem 0 0 0;
-    display:grid;
+    margin: 0.6rem 0 0 0;
+    display: grid;
     grid-template-columns: repeat(10, 1fr);
-    gap: 0.5rem;
-    height: 2rem;
+    gap: 0.3rem;
   }
-
 }
 </style>
