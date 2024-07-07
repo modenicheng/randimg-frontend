@@ -42,13 +42,6 @@ const routes = [
         },
       },
       {
-        path: "image/:id",
-        component: () => import("../views/Image.vue"),
-        meta: {
-          navigator: false,
-        },
-      },
-      {
         path: "image-list",
         name: "image-list",
         component: () => import("../views/ImageList.vue"),
