@@ -4,7 +4,7 @@ const store = useUserStore()
 
 let token = store.user.token
 
-let baseURL = import.meta.env.DEV ? 'http://127.0.0.1:800' : 'http://server.modenc.top:8000'
+let baseURL = import.meta.env.DEV ? 'http://127.0.0.1:800' : 'https://img.modenc.top:8000'
 
 const Axios = axios.create({
     baseURL: baseURL,
