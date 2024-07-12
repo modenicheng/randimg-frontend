@@ -14,10 +14,6 @@
   flex-direction: column;
   width: 100%;
   padding: 10rem;
-}
-.doc {
-  width: 100%;
   height: 100vh;
-  background-color: aquamarine;
 }
 </style>

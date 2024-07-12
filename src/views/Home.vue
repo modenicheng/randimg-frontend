@@ -48,7 +48,7 @@ const toggleTheme = () => {
       </v-list>
     </v-navigation-drawer>
 
-    <v-main id="main" class="d-flex align-center justify-center main" style="min-height: 100%; flex-direction: column">
+    <v-main id="main" class="d-flex align-center main" style="min-height: 100%; flex-direction: column">
       <!-- <v-main id="main"> -->
       <router-view></router-view>
     </v-main>
