@@ -2,7 +2,7 @@
 import Axios from "../axios/axios";
 import { onMounted, ref } from "vue";
 import { useUserStore } from "../store/store";
-
+import { mdiFilterOutline } from "@mdi/js";
 const store = useUserStore()
 
 interface Author {
@@ -23,13 +23,50 @@ interface imageObject {
   accessable: boolean | undefined;
   patchLoading: boolean | undefined;
 }
-let images = ref<[imageObject]>();
+interface requestParams {
+  offset?: number;
+  limit?: number;
+  tags?: string | string[],
+  author?: string | number,
+  desc?: boolean;
+  ratioRange?: [number, number];
+  accessable?: boolean;
+  unaccessable?: boolean;
+}
+
+
+let images = ref<[imageObject] | undefined>();
 let is_empty = ref(false);
 
+let params = ref<requestParams>({
+  ratioRange: [0, 10],
+  accessable: true,
+  unaccessable: true,
+  desc: true,
+})
+
 let limit = ref(40);
-const getImages = async () => {
+const getImages = async (filterUpdate: boolean = false) => {
+  let tagQuery
+  if (filterUpdate) {
+    clear()
+  }
+  if (params.value.tags) {
+    tagQuery = typeof params.value.tags === "string"
+      ? params.value.tags
+      : params.value.tags.join(",");
+  }
+  let accessable
+  if (params.value.accessable && params.value.unaccessable) {
+    accessable = "all"
+  } else if (params.value.accessable === true) {
+    accessable = 'true'
+  } else if (params.value.unaccessable === true) {
+    accessable = 'false'
+  }
+  let query = `?offset=${currentOffset.value}&limit=${limit.value}${tagQuery ? `&tags=${tagQuery}&` : ""}${params.value.author ? `&author=${params.value.author}` : ''}${params.value.ratioRange ? `&ratio_floor=${params.value.ratioRange[0]}&ratio_ceil=${params.value.ratioRange[1]}` : ''}${accessable ? `&accessable=${accessable}` : ''}${params.value.desc ? `&desc=true` : '&desc=false'}`
   await Axios.get(
-    `/list?offset=${currentOffset.value}&limit=${limit.value}`
+    `/list${query}`,
   ).then((res) => {
     if (res.status === 200) {
       if (res.data) {
@@ -45,9 +82,9 @@ const getImages = async () => {
   });
 };
 
-let col1 = [];
-let col2 = [];
-let col3 = [];
+let col1: imageObject[] = [];
+let col2: imageObject[] = [];
+let col3: imageObject[] = [];
 let colHeight = {
   col1: 0,
   col2: 0,
@@ -123,7 +160,7 @@ const showDetail = (imageId: number) => {
       imgShowHeight.value =
         imgShowWidth.value / imageDetailData.value.aspect_ratio;
     } else {
-      imgShowWidth.value = 0.6 * window.innerWidth;
+      imgShowWidth.value = 0.5 * window.innerWidth;
       imgShowHeight.value =
         imgShowWidth.value / imageDetailData.value.aspect_ratio;
     }
@@ -155,14 +192,77 @@ const patchImage = (image: imageObject) => {
   });
 };
 let isHoverBtn = ref(false);
+const filterUpdate = () => {
+  getImages(true)
+}
+const clear = () => {
+  colHeight = {
+    col1: 0,
+    col2: 0,
+    col3: 0
+  }
+  col1 = []
+  col2 = []
+  col3 = []
+  cols.value = [[], [], []];
+  images.value = undefined;
+  currentOffset.value = 0
+}
+let tags = ref([]);
+let tagSelectorLoading = ref(false)
+const getTags = () => {
+  Axios.get("/tags").then((res) => {
+    tagSelectorLoading.value = true
+    if (res.status === 200) {
+      tags.value = res.data
+      tagSelectorLoading.value = false
+      return res.data
+    }
+  })
+}
+getTags()
 </script>
 <template>
-  <v-overlay z-index="10000" v-model="overlay" class="overlay" @after-leave="overlayClosed()">
+  <v-dialog max-width="600" @afterLeave="filterUpdate()">
+    <template v-slot:activator="{ props }">
+      <v-fab v-bind="props" :icon='mdiFilterOutline' class='fab'>
+      </v-fab>
+    </template>
+    <template v-slot:default="{ isActive }">
+      <v-card class="filter-card">
+        <div style="font-weight: bolder; font-size: 1.3rem;">筛选条件</div>
+        <v-divider style="margin: 0.5rem 0"></v-divider>
+        <v-form>
+          <v-autocomplete :loading="tagSelectorLoading" closable-chips clearable chips multiple label="标签/Tags"
+            v-model="params.tags" :items="tags" item-title="search_string" item-value="name">
+            <template v-slot:item="{ props, item }">
+              <v-list-item v-bind="props" :subtitle="item.raw.translated_name" :title="item.raw.name"></v-list-item>
+            </template>
+          </v-autocomplete>
+          <v-text-field v-model="params.author" label="作者/Author" />
+          <v-range-slider thumb-label="true" min="0" max="10" v-model="params.ratioRange" strict
+            label="宽高比/Ratio Range"></v-range-slider>
+          <v-checkbox v-model="params.desc" label="倒序排列"></v-checkbox>
+          <span v-if='store.user.token'>
+            <v-checkbox v-model="params.accessable" label="Only Accessible"></v-checkbox>
+            <v-checkbox v-model="params.unaccessable" label="Only Not Accessible"></v-checkbox>
+          </span>
+        </v-form>
+        <v-card-actions>
+          <v-spacer></v-spacer>
+          <v-btn text="应用" @click="filterUpdate()"></v-btn>
+          <v-btn text="确认" @click="filterUpdate(); isActive.value = false"></v-btn>
+        </v-card-actions>
+      </v-card>
+    </template>
+  </v-dialog>
+
+  <v-overlay scroll-strategy="block" v-if="imageDetailData" z-index="10000" v-model="overlay" :class="imageDetailData.aspect_ratio >= 1.25 ? 'overlay' : 'overlay align-center'" @after-leave="overlayClosed()">
     <div class="container-cols" v-if="imageDetailData" :style="{
       gridTemplateColumns:
         imageDetailData.aspect_ratio >= 1.25 ? '1fr' : 'auto 1fr',
     }">
-      <div>
+      <div class="img-container">
         <v-img :lazy-src="imageDetailData.src + '/scale_to_1080x1080'" :width="imgShowWidth" :height="imgShowHeight"
           :src="imageDetailData.src" @load="imageDetailData.loaded = true">
           <template v-slot:placeholder v-if="!imageDetailData.loaded">
@@ -175,9 +275,7 @@ let isHoverBtn = ref(false);
           gridTemplateColumns: `repeat(${imageDetailData.aspect_ratio < 0.7 ? '5' : '10'
             }, 1fr)`,
           height: `${imageDetailData.aspect_ratio < 0.7 ? '4.3rem' : '2rem'}`,
-        }"
-        v-if="imageDetailData.colors"
-        >
+        }" v-if="imageDetailData.colors">
           <div v-for="color of imageDetailData.colors.colors">
             <v-tooltip location="top" class="color-card" :text="`rgb(${color[0]}, ${color[1]}, ${color[2]})`">
               <template class="color-card" v-slot:activator="{ props }">
@@ -325,7 +423,7 @@ let isHoverBtn = ref(false);
     overflow: hidden;
     white-space: nowrap;
 
-    width: 100%;
+    width: 90%;
     word-break: keep-all;
     word-wrap: normal;
   }
@@ -363,7 +461,6 @@ let isHoverBtn = ref(false);
 .overlay {
   display: flex;
   justify-content: center;
-  align-items: center;
   width: 100%;
   max-height: 100vh;
   overflow: auto;
@@ -371,17 +468,33 @@ let isHoverBtn = ref(false);
   .container-cols {
     display: grid;
     grid-template-columns: auto 1fr;
-    gap: 1rem;
-    // max-height: 100vh;
-    overflow: auto;
+    gap: 0.5rem;
+    overflow: auto !important;
+    padding: 1rem;
 
-    .gap {
-      min-height: 5rem;
+    .img-container {
+      display: flex;
+      flex-direction: column;
+      justify-items: end;
+      // height: 120%;
+      padding: 0;
+    }
+
+    .color-container {
+      .color-card {
+        width: 100%;
+        height: 100%;
+      }
+
+      margin: 0.6rem 0 0 0;
+      display: grid;
+      grid-template-columns: repeat(10, 1fr);
+      gap: 0.3rem;
     }
   }
 
   .info {
-    min-width: 30rem;
+    min-width: 20rem;
     // max-width: 60vw;
     // width: max-content;
     padding: 1rem;
@@ -443,16 +556,17 @@ let isHoverBtn = ref(false);
     }
   }
 
-  .color-container {
-    .color-card {
-      width: 100%;
-      height: 100%;
-    }
 
-    margin: 0.6rem 0 0 0;
-    display: grid;
-    grid-template-columns: repeat(10, 1fr);
-    gap: 0.3rem;
-  }
+}
+
+.fab {
+  position: fixed;
+  bottom: 5rem;
+  right: 5rem;
+}
+
+.filter-card {
+  padding: 1rem;
+
 }
 </style>
