@@ -257,7 +257,7 @@ getTags()
     </template>
   </v-dialog>
 
-  <v-overlay scroll-strategy="block" v-if="imageDetailData" z-index="10000" v-model="overlay" :class="imageDetailData.aspect_ratio >= 1.25 ? 'overlay' : 'overlay align-center'" @after-leave="overlayClosed()">
+  <v-overlay scroll-strategy="none" v-if="imageDetailData" z-index="10000" v-model="overlay" :class="imageDetailData.aspect_ratio >= 1.25 ? 'overlay' : 'overlay align-center'" @after-leave="overlayClosed()">
     <div class="container-cols" v-if="imageDetailData" :style="{
       gridTemplateColumns:
         imageDetailData.aspect_ratio >= 1.25 ? '1fr' : 'auto 1fr',
@@ -469,7 +469,7 @@ getTags()
     display: grid;
     grid-template-columns: auto 1fr;
     gap: 0.5rem;
-    overflow: auto !important;
+    overflow: scroll !important;
     padding: 1rem;
 
     .img-container {
