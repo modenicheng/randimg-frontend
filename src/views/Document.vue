@@ -20,14 +20,39 @@
     <h2>
       2. API / 接口
     </h2>
-    <h3>/</h3>
-    <h3>/list</h3>
-    <h3>/token</h3>
-    <h2>Data / 统计数据</h2>
+    <div style="padding: 0 1rem">
+      <h3 class="route">/</h3>
+      <div>
+        随机获取一张图片
+        <h4>
+          Params / 参数
+          <li>
+            
+          </li>
+        </h4>
+        <div>
+          
+        </div>
+      </div>
+      <h3 class="route">/list</h3>
+      <h3 class="route">/token</h3>
+
+    </div>
+    <h2>Statistic / 统计数据</h2>
   </div>
 </template>
 <script lang="ts"></script>
 <style lang="scss" scoped>
+.route {
+  border-bottom: 0.2rem solid rgb(var(--v-theme-primary));
+  width: fit-content;
+}
+
+.route::before {
+  content: "";
+  margin-right: 0rem;
+}
+
 .doc-root {
   display: flex;
   justify-content: left;
@@ -36,24 +61,29 @@
   padding: 4rem 0;
   gap: 1rem;
 }
+
 h1 {
   position: relative;
 }
+
 h2 {
   margin-top: 1rem;
   position: relative;
   left: -1.5rem;
 }
+
 h2::before {
   content: "#";
   margin-right: 0.5rem;
   position: relative;
   color: rgb(var(--v-theme-primary));
 }
+
 h3 {
   position: relative;
   left: -1.5rem;
 }
+
 h3::before {
   content: "#";
   margin-right: 0.5rem;

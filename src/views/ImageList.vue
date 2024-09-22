@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import Axios from "../axios/axios";
-import { onMounted, ref } from "vue";
+import { onMounted, ref, nextTick } from 'vue';
 import { useUserStore } from "../store/store";
 import { mdiFilterOutline } from "@mdi/js";
 const store = useUserStore()
@@ -38,6 +38,8 @@ interface requestParams {
 let images = ref<[imageObject] | undefined>();
 let is_empty = ref(false);
 
+let refresh = ref(true)
+
 let params = ref<requestParams>({
   ratioRange: [0, 10],
   accessable: true,
@@ -46,11 +48,12 @@ let params = ref<requestParams>({
 })
 
 let limit = ref(40);
-const getImages = async (filterUpdate: boolean = false) => {
+
+let getImagesFuncLock = ref(false)
+const getImages = async () => {
+  if (getImagesFuncLock.value) return
+  getImagesFuncLock.value = true
   let tagQuery
-  if (filterUpdate) {
-    clear()
-  }
   if (params.value.tags) {
     tagQuery = typeof params.value.tags === "string"
       ? params.value.tags
@@ -75,10 +78,17 @@ const getImages = async (filterUpdate: boolean = false) => {
         currentOffset.value += limit.value;
         if (res.data.length < limit.value) {
           is_empty.value = true;
+        } else {
+          is_empty.value = false;
         }
+
       } else {
       }
     }
+    getImagesFuncLock.value = false
+  }
+  ).catch(() => {
+    getImagesFuncLock.value = false
   });
 };
 
@@ -192,8 +202,18 @@ const patchImage = (image: imageObject) => {
   });
 };
 let isHoverBtn = ref(false);
-const filterUpdate = () => {
-  getImages(true)
+
+let isUpdating = ref(false);
+const filterUpdate = async () => {
+  if (isUpdating.value) return
+  isUpdating.value = true
+  clear()
+  await getImages()
+  refresh.value = false
+  await nextTick(() => {
+    refresh.value = true;
+    isUpdating.value = false
+  })
 }
 const clear = () => {
   colHeight = {
@@ -251,13 +271,14 @@ getTags()
         <v-card-actions>
           <v-spacer></v-spacer>
           <v-btn text="应用" @click="filterUpdate()"></v-btn>
-          <v-btn text="确认" @click="filterUpdate(); isActive.value = false"></v-btn>
+          <v-btn text="确认" @click="isActive.value = false"></v-btn>
         </v-card-actions>
       </v-card>
     </template>
   </v-dialog>
 
-  <v-overlay scroll-strategy="none" v-if="imageDetailData" z-index="10000" v-model="overlay" :class="imageDetailData.aspect_ratio >= 1.25 ? 'overlay' : 'overlay align-center'" @after-leave="overlayClosed()">
+  <v-overlay scroll-strategy="none" v-if="imageDetailData" z-index="10000" v-model="overlay"
+    :class="imageDetailData.aspect_ratio >= 1.25 ? 'overlay' : 'overlay align-center'" @after-leave="overlayClosed()">
     <div class="container-cols" v-if="imageDetailData" :style="{
       gridTemplateColumns:
         imageDetailData.aspect_ratio >= 1.25 ? '1fr' : 'auto 1fr',
@@ -337,7 +358,7 @@ getTags()
     </div>
   </v-overlay>
   <v-container v-if="cols" class="container">
-    <v-infinite-scroll :onLoad="loadData">
+    <v-infinite-scroll v-if="refresh" :onLoad="loadData">
       <v-row no-gutters>
         <v-col v-for="colIndex of [0, 1, 2]">
           <template v-for="image of cols[colIndex]">

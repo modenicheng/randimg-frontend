@@ -51,13 +51,22 @@ const routes = [
         },
       },
       {
+        path: "image/:id",
+        name: "image-detail",
+        component: () => import("../views/ImageDetail.vue"),
+        meta: {
+          navigator: false,
+          title: "图片详情",
+        },
+      },
+      {
         path: "/:pathMatch(.*)*",
         name: "NotFound",
         component: () => import("../views/404.vue"),
         meta: {
-            navigator: false,
-            title: "404",
-          },
+          navigator: false,
+          title: "404",
+        },
       },
     ],
   },
