@@ -45,9 +45,10 @@ let params = ref<requestParams>({
   accessable: true,
   unaccessable: true,
   desc: true,
+  offset: 0,
 })
 
-let limit = ref(40);
+let limit = ref<number>(40);
 
 let getImagesFuncLock = ref(false)
 const getImages = async () => {
@@ -67,6 +68,7 @@ const getImages = async () => {
   } else if (params.value.unaccessable === true) {
     accessable = 'false'
   }
+  console.log(typeof currentOffset.value)
   let query = `?offset=${currentOffset.value}&limit=${limit.value}${tagQuery ? `&tags=${tagQuery}&` : ""}${params.value.author ? `&author=${params.value.author}` : ''}${params.value.ratioRange ? `&ratio_floor=${params.value.ratioRange[0]}&ratio_ceil=${params.value.ratioRange[1]}` : ''}${accessable ? `&accessable=${accessable}` : ''}${params.value.desc ? `&desc=true` : '&desc=false'}`
   await Axios.get(
     `/list${query}`,
@@ -75,7 +77,7 @@ const getImages = async () => {
       if (res.data) {
         images.value = res.data;
         cols.value = calcImageCol(res.data);
-        currentOffset.value += limit.value;
+        currentOffset.value += limit.value as number;
         if (res.data.length < limit.value) {
           is_empty.value = true;
         } else {
@@ -134,7 +136,7 @@ const getMinCol = (colHeight: { col1: number; col2: number; col3: number }) => {
   }
 };
 let cols = ref<imageObject[][]>();
-let currentOffset = ref(0);
+let currentOffset = ref<number>(0);
 getImages();
 const loadData = async ({ done }: any) => {
   await getImages();
@@ -186,6 +188,12 @@ const toUrl = (url: string) => {
   window.open(url, "_blank");
 };
 
+
+let totalImages = ref(100);
+Axios.get('/statistic').then(res => {
+  totalImages.value = res.data.illust_count
+})
+
 const patchImage = (image: imageObject) => {
   image.patchLoading = true
   image.accessable = !image.accessable
@@ -208,6 +216,11 @@ const filterUpdate = async () => {
   if (isUpdating.value) return
   isUpdating.value = true
   clear()
+  if (params.value.offset !== undefined) {
+    currentOffset.value = params.value.offset as number
+  } else {
+    currentOffset.value = 0
+  }
   await getImages()
   refresh.value = false
   await nextTick(() => {
@@ -253,6 +266,13 @@ getTags()
         <div style="font-weight: bolder; font-size: 1.3rem;">筛选条件</div>
         <v-divider style="margin: 0.5rem 0"></v-divider>
         <v-form>
+          <v-slider :step="1" :min="0" :max="totalImages" thumb-label label="查询起始偏移/Offset" v-model="params.offset">
+            <template v-slot:append>
+              <v-text-field label="查询起始偏移/Offset" v-model="params.offset" density="compact" style="width: 6rem" type="number" hide-details
+                single-line></v-text-field>
+            </template>
+
+          </v-slider>
           <v-autocomplete :loading="tagSelectorLoading" closable-chips clearable chips multiple label="标签/Tags"
             v-model="params.tags" :items="tags" item-title="search_string" item-value="name">
             <template v-slot:item="{ props, item }">
