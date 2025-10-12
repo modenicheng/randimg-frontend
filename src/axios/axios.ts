@@ -4,7 +4,7 @@ const store = useUserStore()
 
 let token = store.user.token
 
-let baseURL = !import.meta.env.DEV || document.cookie.includes('PROD') ?  'https://img.modenc.top:8000' : 'http://127.0.0.1:8001'
+let baseURL = !import.meta.env.DEV || document.cookie.includes('PROD') ?  'https://imgapi.modenc.top' : 'http://127.0.0.1:8001'
 
 const Axios = axios.create({
     baseURL: baseURL,
