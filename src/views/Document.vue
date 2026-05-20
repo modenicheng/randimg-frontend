@@ -1,44 +1,148 @@
 <template>
   <div class="doc-root">
-    <h1>随机图片API文档</h1>
-    <h2>0. Introduction / 简介</h2>
-    <p>
-      这是一个简单的、由 python FastAPI
-      作为后端的随机图片服务。它有着不同于其它随机图片服务的调用方式，还有相对而言一些独特（也许吧）的功能。
-    </p>
-    <h2>1. Features / 特性一览</h2>
-    <div>
-      <li>半自动化爬虫，爬取Pixiv指定用户的作品（排行榜、搜索待开发；前端爬虫任务管理待开发）</li>
-      <li>图片经过人工审核</li>
-      <li>支持 Tags / Author 筛选</li>
-      <li>返回格式可选——可以图方便直接返回图片；也可以返回包含更多信息的 json 数据</li>
-      <li>有 /list 接口，你可以拿到列表之后自己随机</li>
-      <li>通过聚类算法提取出每张图片的10个主色，可用于网站主题适配，也可以用作配色参考</li>
-      <li>支持返回缩略图</li>
-      <li>计划支持随机头像（利用 dogecloud 自带的智能裁切）</li>
-    </div>
-    <h2>
-      2. API / 接口
-    </h2>
-    <div style="padding: 0 1rem">
-      <h3 class="route">/</h3>
-      <div>
-        随机获取一张图片
-        <h4>
-          Params / 参数
-          <li>
-            
-          </li>
-        </h4>
-        <div>
-          
-        </div>
-      </div>
-      <h3 class="route">/list</h3>
-      <h3 class="route">/token</h3>
+    <h1>随机图片 API 文档</h1>
 
+    <h2>0. 基本信息</h2>
+    <ul>
+      <li>前端生产环境 Base URL：<code>https://imgapi.modenc.top</code></li>
+      <li>前端开发环境 Base URL：<code>http://127.0.0.1:8001</code></li>
+      <li>后端文档默认本地地址：<code>http://127.0.0.1:8000</code></li>
+      <li>鉴权方式：<code>Authorization: Bearer &lt;token&gt;</code></li>
+      <li>登录接口：<code>POST /token</code>（<code>application/x-www-form-urlencoded</code>）</li>
+    </ul>
+
+    <h2>1. 数据结构</h2>
+    <h3 class="route">ImageObject</h3>
+    <pre>{
+  "id": 123,
+  "title": "string",
+  "src": "https://...",
+  "source_id": 999,
+  "aspect_ratio": 1.33,
+  "primary_color": [12, 23, 34],
+  "accessable": true,
+  "author": {
+    "id": 1,
+    "name": "string",
+    "platform": "pixiv",
+    "platform_id": 123456
+  }
+}</pre>
+
+    <h3 class="route">RandomImageResponse / ImageDetail</h3>
+    <pre>{
+  "id": 123,
+  "title": "string",
+  "src": "https://...",
+  "width": 1200,
+  "height": 900,
+  "aspect_ratio": 1.333,
+  "source_id": 999,
+  "source_url": "https://...",
+  "author": [
+    {
+      "id": 1,
+      "name": "string",
+      "homepage": "https://...",
+      "platform": "pixiv"
+    }
+  ],
+  "tags": [
+    { "id": 1, "name": "猫耳", "num": 888 }
+  ],
+  "colors": {
+    "color_primary": [123, 100, 233],
+    "color_series": [[123, 100, 233], [20, 20, 20]]
+  },
+  "accessable": true,
+  "uploaded": true,
+  "processed": true,
+  "processing": false
+}</pre>
+
+
+    <h2>2. 颜色功能亮点（Color Feature）</h2>
+    <p>
+      每张图片都带有颜色分析结果，可直接用于主题适配、按钮取色、背景渐变、推荐色卡等场景。
+    </p>
+    <ul>
+      <li><code>colors.color_primary</code>：主色（Primary Color），默认代表该图最具视觉代表性的颜色。</li>
+      <li><code>colors.color_series</code>：调色盘数组，固定包含 10 组 RGB 颜色。</li>
+      <li><code>color_series</code> 的 10 个颜色按灰度（明度）排序，通常可理解为从更暗到更亮的渐进序列。</li>
+      <li>前端可以直接按序渲染色条，或将第 1~3 个暗色用于文字背景、第 8~10 个亮色用于高亮元素。</li>
+    </ul>
+    <pre>{
+  "colors": {
+    "color_primary": [123, 100, 233],
+    "color_series": [
+      [24, 20, 34],
+      [41, 35, 56],
+      [63, 54, 89],
+      [84, 71, 121],
+      [103, 86, 148],
+      [123, 100, 233],
+      [149, 126, 238],
+      [177, 157, 243],
+      [205, 191, 247],
+      [230, 221, 252]
+    ]
+  }
+}</pre>
+    <p>说明：<code>primary</code> 是“主色语义”，<code>series</code> 是“可直接使用的 10 级调色盘语义”。</p>
+
+    <h2>3. 接口说明</h2>
+
+    <div style="padding: 0 1rem">
+      <h3 class="route">GET /</h3>
+      <p>随机返回一张图片；支持返回 JSON 或图片重定向（307）。</p>
+      <h4>Query 参数</h4>
+      <ul>
+        <li><code>format</code>: <code>json</code> / <code>image</code>（默认 <code>json</code>）</li>
+        <li><code>local</code>: <code>true/false</code>（默认 <code>false</code>）</li>
+        <li><code>ratio_floor</code>, <code>ratio_ceil</code>: 宽高比范围</li>
+        <li><code>tags</code>: 逗号分隔标签</li>
+      </ul>
+
+      <h3 class="route">GET /list</h3>
+      <p>分页查询图片列表。</p>
+      <h4>Query 参数</h4>
+      <ul>
+        <li><code>offset</code>: 起始偏移（默认 0）</li>
+        <li><code>limit</code>: 每次请求条数（后端默认 30，前端当前请求 40）</li>
+        <li><code>desc</code>: 是否降序（默认 true）</li>
+        <li><code>ratio_floor</code>, <code>ratio_ceil</code>: 宽高比筛选（默认 0~10）</li>
+        <li><code>author</code>: 作者 ID 或名字</li>
+        <li><code>accessable</code>: <code>true</code>/<code>false</code>/<code>all</code></li>
+        <li><code>tags</code>: 标签名，多个以逗号拼接</li>
+      </ul>
+      <p>未携带有效 token 时，仅返回 <code>accessable=true</code> 的图片。</p>
+
+      <h3 class="route">GET /image/{image_id}</h3>
+      <p>按 ID 获取图片；支持 JSON 或图片重定向（307）。</p>
+
+      <h3 class="route">PATCH /image/{image_id}</h3>
+      <p>更新图片信息（需鉴权）。前端当前主要用于更新 <code>accessable</code>。</p>
+
+      <h3 class="route">POST /token</h3>
+      <p>管理员登录接口，提交 <code>username</code>、<code>password</code>。</p>
+      <pre>{ "access_token": "...", "token_type": "bearer" }</pre>
+
+      <h3 class="route">GET /tags</h3>
+      <p>获取标签列表，包含 <code>id</code>、<code>name</code>、<code>translated_name</code>、<code>search_string</code>。</p>
+
+      <h3 class="route">GET /statistic</h3>
+      <p>获取统计信息；前端使用 <code>illust_count</code> 作为筛选偏移上限。</p>
+      <pre>{ "illust_count": 123, "tag_count": 456, "author_count": 78 }</pre>
     </div>
-    <h2>Statistic / 统计数据</h2>
+
+    <h2>4. 常见状态码</h2>
+    <ul>
+      <li><code>200</code>：请求成功</li>
+      <li><code>400</code>：参数错误</li>
+      <li><code>401</code>：未授权 / token 无效</li>
+      <li><code>404</code>：资源不存在</li>
+      <li><code>500</code>：服务内部错误</li>
+    </ul>
   </div>
 </template>
 <script lang="ts"></script>
@@ -48,11 +152,6 @@
   width: fit-content;
 }
 
-.route::before {
-  content: "";
-  margin-right: 0rem;
-}
-
 .doc-root {
   display: flex;
   justify-content: left;
@@ -60,6 +159,13 @@
   width: 80%;
   padding: 4rem 0;
   gap: 1rem;
+}
+
+pre {
+  overflow-x: auto;
+  background: rgba(var(--v-theme-on-surface), 0.06);
+  border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
 }
 
 h1 {
@@ -89,5 +195,9 @@ h3::before {
   margin-right: 0.5rem;
   position: relative;
   color: rgb(var(--v-theme-primary));
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 </style>
