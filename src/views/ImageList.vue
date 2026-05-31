@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import Axios from "../axios/axios";
-import { onMounted, ref, nextTick } from 'vue';
+import { onMounted, onUnmounted, ref, nextTick } from 'vue';
 import { useUserStore } from "../store/store";
 import { mdiFilterOutline } from "@mdi/js";
 const store = useUserStore()
@@ -68,8 +68,19 @@ const getImages = async () => {
   } else if (params.value.unaccessable === true) {
     accessable = 'false'
   }
-  console.log(typeof currentOffset.value)
-  let query = `?offset=${currentOffset.value}&limit=${limit.value}${tagQuery ? `&tags=${tagQuery}&` : ""}${params.value.author ? `&author=${params.value.author}` : ''}${params.value.ratioRange ? `&ratio_floor=${params.value.ratioRange[0]}&ratio_ceil=${params.value.ratioRange[1]}` : ''}${accessable ? `&accessable=${accessable}` : ''}${params.value.desc ? `&desc=true` : '&desc=false'}`
+  const queryParams: Record<string, string> = {
+    offset: String(currentOffset.value),
+    limit: String(limit.value),
+  }
+  if (tagQuery) queryParams.tags = tagQuery
+  if (params.value.author) queryParams.author = String(params.value.author)
+  if (params.value.ratioRange) {
+    queryParams.ratio_floor = String(params.value.ratioRange[0])
+    queryParams.ratio_ceil = String(params.value.ratioRange[1])
+  }
+  if (accessable) queryParams.accessable = accessable
+  queryParams.desc = params.value.desc ? 'true' : 'false'
+  const query = new URLSearchParams(queryParams).toString()
   await Axios.get(
     `/list${query}`,
   ).then((res) => {
@@ -124,20 +135,14 @@ const calcImageCol = (images: [imageObject]) => {
   return [col1, col2, col3];
 };
 
-const getMinCol = (colHeight: { col1: number; col2: number; col3: number }) => {
-  let m = Math.min(colHeight.col1, colHeight.col2, colHeight.col3);
-  switch (m) {
-    case colHeight.col1:
-      return 0;
-    case colHeight.col2:
-      return 1;
-    case colHeight.col3:
-      return 2;
-  }
+const getMinCol = (colHeight: { col1: number; col2: number; col3: number }): number => {
+  const m = Math.min(colHeight.col1, colHeight.col2, colHeight.col3);
+  if (m === colHeight.col1) return 0;
+  if (m === colHeight.col2) return 1;
+  return 2;
 };
 let cols = ref<imageObject[][]>();
 let currentOffset = ref<number>(0);
-getImages();
 const loadData = async ({ done }: any) => {
   await getImages();
   if (is_empty.value) {
@@ -146,19 +151,22 @@ const loadData = async ({ done }: any) => {
     done("ok");
   }
 };
+const onResize = () => {
+  colWidth.value = Math.floor(window.innerWidth / 7.5);
+};
 onMounted(() => {
-  addEventListener("resize", () => {
-    colWidth.value = Math.floor(window.innerWidth / 7.5);
-  });
+  window.addEventListener("resize", onResize);
+});
+onUnmounted(() => {
+  window.removeEventListener("resize", onResize);
 });
 
 let overlay = ref(false);
 let imageDetailData = ref();
 const showDetail = (imageId: number) => {
-  try {
+  if (imageDetailData.value) {
     imageDetailData.value.loaded = false;
-  } catch { }
-
+  }
   overlay.value = true;
   Axios.get(`/image/${imageId}`).then((res) => {
     imageDetailData.value = res.data;
@@ -199,9 +207,8 @@ const patchImage = (image: imageObject) => {
   image.accessable = !image.accessable
   Axios.patch(`/image/${image.id}`, image).then(res => {
     if (res.status === 200) {
+      Object.assign(image, res.data)
       image.patchLoading = false
-      image = res.data
-      return res.data
     }
   }).catch((e) => {
     console.error(e)
@@ -218,10 +225,7 @@ const filterUpdate = async () => {
   clear()
   if (params.value.offset !== undefined) {
     currentOffset.value = params.value.offset as number
-  } else {
-    currentOffset.value = 0
   }
-  await getImages()
   refresh.value = false
   await nextTick(() => {
     refresh.value = true;
@@ -244,13 +248,13 @@ const clear = () => {
 let tags = ref([]);
 let tagSelectorLoading = ref(false)
 const getTags = () => {
+  tagSelectorLoading.value = true
   Axios.get("/tags").then((res) => {
-    tagSelectorLoading.value = true
     if (res.status === 200) {
       tags.value = res.data
-      tagSelectorLoading.value = false
-      return res.data
     }
+  }).finally(() => {
+    tagSelectorLoading.value = false
   })
 }
 getTags()
