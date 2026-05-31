@@ -61,6 +61,16 @@ const routes = [
         },
       },
       {
+        path: "tasks",
+        name: "tasks",
+        component: () => import("../views/TaskManager.vue"),
+        meta: {
+          navigator: true,
+          requireAuth: true,
+          title: "任务管理",
+        },
+      },
+      {
         path: "image/:id",
         name: "image-detail",
         component: () => import("../views/ImageDetail.vue"),
