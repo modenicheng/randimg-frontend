@@ -16,7 +16,7 @@ let navList = ref([]);
 for (let item of routes) {
   if (item.name === "Home") {
     for (let c of item.children) {
-      if (c.meta.navigator) {
+      if (c.meta.navigator && (!c.meta.requireAuth || store.user.token)) {
         navList.value.push(c);
       }
     }

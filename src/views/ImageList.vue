@@ -19,19 +19,19 @@ interface imageObject {
   source_id: number;
   loaded: boolean | undefined;
   aspect_ratio: number;
-  primary_color: [number, number, number];
-  accessable: boolean | undefined;
+  primary_color: [number, number, number] | null;
+  accessible: boolean | undefined;
   patchLoading: boolean | undefined;
 }
 interface requestParams {
   offset?: number;
   limit?: number;
-  tags?: string | string[],
-  author?: string | number,
+  tags?: string | string[];
+  author?: string | number;
   desc?: boolean;
   ratioRange?: [number, number];
-  accessable?: boolean;
-  unaccessable?: boolean;
+  accessible?: boolean;
+  inaccessible?: boolean;
 }
 
 
@@ -42,8 +42,8 @@ let refresh = ref(true)
 
 let params = ref<requestParams>({
   ratioRange: [0, 10],
-  accessable: true,
-  unaccessable: true,
+  accessible: true,
+  inaccessible: true,
   desc: true,
   offset: 0,
 })
@@ -60,23 +60,28 @@ const getImages = async () => {
       ? params.value.tags
       : params.value.tags.join(",");
   }
-  let accessable
-  if (params.value.accessable && params.value.unaccessable) {
-    accessable = "all"
-  } else if (params.value.accessable === true) {
-    accessable = 'true'
-  } else if (params.value.unaccessable === true) {
-    accessable = 'false'
+  let accessibleFilter
+  if (params.value.accessible && params.value.inaccessible) {
+    accessibleFilter = "all"
+  } else if (params.value.accessible === true) {
+    accessibleFilter = 'true'
+  } else if (params.value.inaccessible === true) {
+    accessibleFilter = 'false'
   }
   console.log(typeof currentOffset.value)
-  let query = `?offset=${currentOffset.value}&limit=${limit.value}${tagQuery ? `&tags=${tagQuery}&` : ""}${params.value.author ? `&author=${params.value.author}` : ''}${params.value.ratioRange ? `&ratio_floor=${params.value.ratioRange[0]}&ratio_ceil=${params.value.ratioRange[1]}` : ''}${accessable ? `&accessable=${accessable}` : ''}${params.value.desc ? `&desc=true` : '&desc=false'}`
+  let query = `?offset=${currentOffset.value}&limit=${limit.value}${tagQuery ? `&tags=${tagQuery}&` : ""}${params.value.author ? `&author=${params.value.author}` : ''}${params.value.ratioRange ? `&ratio_floor=${params.value.ratioRange[0]}&ratio_ceil=${params.value.ratioRange[1]}` : ''}${accessibleFilter ? `&accessible=${accessibleFilter}` : ''}${params.value.desc ? `&desc=true` : '&desc=false'}`
   await Axios.get(
     `/list${query}`,
   ).then((res) => {
     if (res.status === 200) {
       if (res.data) {
-        images.value = res.data;
-        cols.value = calcImageCol(res.data);
+        const mapped = res.data.map((img: any) => ({
+          ...img,
+          primary_color: img.primary_color?.rgb ?? img.primary_color ?? null,
+          accessible: img.accessible ?? undefined,
+        }))
+        images.value = mapped;
+        cols.value = calcImageCol(mapped);
         currentOffset.value += limit.value as number;
         if (res.data.length < limit.value) {
           is_empty.value = true;
@@ -161,7 +166,11 @@ const showDetail = (imageId: number) => {
 
   overlay.value = true;
   Axios.get(`/image/${imageId}`).then((res) => {
-    imageDetailData.value = res.data;
+    const d = res.data
+    d.colors = Array.isArray(d.colors) && d.colors.length && d.colors[0]?.rgb
+      ? { colors: d.colors.map((c: any) => c.rgb) }
+      : d.colors
+    imageDetailData.value = d;
     if (imageDetailData.value.aspect_ratio < 0.7) {
       imgShowHeight.value = 0.8 * window.innerHeight;
       imgShowWidth.value =
@@ -196,16 +205,15 @@ Axios.get('/statistic').then(res => {
 
 const patchImage = (image: imageObject) => {
   image.patchLoading = true
-  image.accessable = !image.accessable
-  Axios.patch(`/image/${image.id}`, image).then(res => {
+  const newValue = !image.accessible
+  Axios.patch(`/image/${image.id}`, { accessible: newValue }).then(res => {
     if (res.status === 200) {
-      image.patchLoading = false
-      image = res.data
-      return res.data
+      Object.assign(image, res.data)
     }
   }).catch((e) => {
     console.error(e)
-    image.accessable = !image.accessable
+    image.accessible = !newValue
+  }).finally(() => {
     image.patchLoading = false
   });
 };
@@ -284,8 +292,8 @@ getTags()
             label="宽高比/Ratio Range"></v-range-slider>
           <v-checkbox v-model="params.desc" label="倒序排列"></v-checkbox>
           <span v-if='store.user.token'>
-            <v-checkbox v-model="params.accessable" label="Only Accessible"></v-checkbox>
-            <v-checkbox v-model="params.unaccessable" label="Only Not Accessible"></v-checkbox>
+            <v-checkbox v-model="params.accessible" label="Only Accessible"></v-checkbox>
+            <v-checkbox v-model="params.inaccessible" label="Only Not Accessible"></v-checkbox>
           </span>
         </v-form>
         <v-card-actions>
@@ -389,9 +397,9 @@ getTags()
                     ? `rgba(${image.primary_color[0]}, ${image.primary_color[1]}, ${image.primary_color[2]}, 0.5)`
                     : 'rgba(0,0,0,0)',
                 }" @click="isHoverBtn ? null : showDetail(image.id)">
-                <v-chip v-if='store.user.token' label :color="image.accessable ? 'green' : 'red'" class="admin-chip"
+                <v-chip v-if='store.user.token' label :color="image.accessible ? 'green' : 'red'" class="admin-chip"
                   :style="{ opacity: isHovering ? '0' : '1', transition: 'opacity 0.2s' }" size="small">{{
-                    image.accessable ? "可访问" : "不可访问"
+                    image.accessible ? "可访问" : "不可访问"
                   }}</v-chip>
                 <template v-slot:placeholder v-if="!image.loaded">
                   <div class="d-flex align-center justify-center fill-height">
@@ -401,10 +409,10 @@ getTags()
                 <v-overlay :model-value="isHovering" class="img-overlay" :width="colWidth"
                   :height="colWidth / image.aspect_ratio" contained :content-props="{ class: 'overlay-content' }">
                   <v-btn v-if='store.user.token' :loading="image.patchLoading"
-                    :color="image.patchLoading ? 'warning' : image.accessable ? 'green' : 'red'" class="admin-btn"
+                    :color="image.patchLoading ? 'warning' : image.accessible ? 'green' : 'red'" class="admin-btn"
                     size="x-small" @click="patchImage(image)" @mouseover="isHoverBtn = true"
                     @mouseleave="isHoverBtn = false">{{
-                      image.accessable ? "可访问" : "不可访问" }}</v-btn>
+                      image.accessible ? "可访问" : "不可访问" }}</v-btn>
                   <div class="inner-container" :width="colWidth" :height="colWidth / image.aspect_ratio"
                     :style="{ height: `${colWidth / image.aspect_ratio}px` }">
                     <div class="title" :style="{ width: `${colWidth}px` }">

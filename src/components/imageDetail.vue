@@ -81,7 +81,12 @@ const imgShowHeight = ref();
 
 const getImageDetail = async () => {
   const res = await Axios.get(`/image/${props.imageId}`);
-  imageDetailData.value = res.data;
+  const d = res.data
+  // 转换 colors 格式：后端返回 [{rgb:[r,g,b], lab:[l,a,b]}, ...] → 前端需要 {colors: [[r,g,b], ...]}
+  if (Array.isArray(d.colors) && d.colors.length && d.colors[0]?.rgb) {
+    d.colors = { colors: d.colors.map((c: any) => c.rgb) }
+  }
+  imageDetailData.value = d;
   // 计算宽高
   if (imageDetailData.value.aspect_ratio < 0.7) {
     imgShowHeight.value = 0.8 * window.innerHeight;

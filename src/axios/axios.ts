@@ -1,20 +1,20 @@
 import axios from 'axios'
 import { useUserStore } from '../store/store'
-const store = useUserStore()
 
-let token = store.user.token
-
-let baseURL = !import.meta.env.DEV || document.cookie.includes('PROD') ?  'https://imgapi.modenc.top' : 'http://127.0.0.1:8001'
+const baseURL = import.meta.env.DEV
+  ? '/api/v2'
+  : 'https://imgapi.modenc.top/api/v2'
 
 const Axios = axios.create({
     baseURL: baseURL,
     timeout: 10000,
-    headers: {
-        Authorization: token ? `Bearer ${token}` : undefined
-    }
 })
 Axios.interceptors.request.use(
     config => {
+        const store = useUserStore()
+        if (store.user.token) {
+            config.headers.Authorization = `Bearer ${store.user.token}`
+        }
         return config
     },
     error => {

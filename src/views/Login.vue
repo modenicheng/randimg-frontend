@@ -17,10 +17,10 @@ let data = ref({
 })
 const submit = () => {
     isLoading.value = true
-    let form = new FormData()
-    form.append('username', data.value.username)
-    form.append('password', data.value.password)
-    Axios.post('/token', form)
+    Axios.post('/token', {
+        username: data.value.username,
+        password: data.value.password,
+    })
         .then(res => {
             l.debug(res)
             if (res.status === 401) {

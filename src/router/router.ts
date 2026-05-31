@@ -51,6 +51,16 @@ const routes = [
         },
       },
       {
+        path: "pixiv-credentials",
+        name: "pixiv-credentials",
+        component: () => import("../views/PixivCredentials.vue"),
+        meta: {
+          navigator: true,
+          requireAuth: true,
+          title: "Pixiv 凭证",
+        },
+      },
+      {
         path: "image/:id",
         name: "image-detail",
         component: () => import("../views/ImageDetail.vue"),

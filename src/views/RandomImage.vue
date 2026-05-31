@@ -26,7 +26,7 @@ let loading = ref(true)
  */
 export interface RandomImageRequest {
     aspect_ratio: number;
-    author: Author[];
+    author: Author;
     colors: Colors;
     height: number;
     id: number;
@@ -44,19 +44,19 @@ export interface Author {
     id?: number;
     name?: string;
     platform?: string;
+    platform_id?: number | string;
     [property: string]: any;
 }
 
 export interface Colors {
-    color_primary: number[];
-    color_series: Array<number[]>;
+    colors: Array<number[]>;
     [property: string]: any;
 }
 
 export interface Tag {
     id: number;
     name: string;
-    num: number;
+    translated_name?: string;
     [property: string]: any;
 }
 
@@ -66,7 +66,15 @@ const getImage = () => {
     loading.value = true
     Axios.get('/')
         .then(res => {
-            let data: RandomImageRequest = res.data
+            let data = res.data
+            // 转换 colors 格式
+            if (Array.isArray(data.colors) && data.colors.length && data.colors[0]?.rgb) {
+                data.colors = { colors: data.colors.map((c: any) => c.rgb) }
+            }
+            // 转换 primary_color 格式
+            if (data.primary_color?.rgb) {
+                data.primary_color = data.primary_color.rgb
+            }
             url.value = data.src
             image.value = data
             loading.value = false

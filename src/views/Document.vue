@@ -5,14 +5,14 @@
     <h2>0. 基本信息</h2>
     <ul>
       <li>前端生产环境 Base URL：<code>https://imgapi.modenc.top</code></li>
-      <li>前端开发环境 Base URL：<code>http://127.0.0.1:8001</code></li>
+      <li>前端开发环境 Base URL：<code>/api/v2</code>（Vite 代理）</li>
       <li>后端文档默认本地地址：<code>http://127.0.0.1:8000</code></li>
       <li>鉴权方式：<code>Authorization: Bearer &lt;token&gt;</code></li>
-      <li>登录接口：<code>POST /token</code>（<code>application/x-www-form-urlencoded</code>）</li>
+      <li>登录接口：<code>POST /token</code>（<code>application/json</code>）</li>
     </ul>
 
     <h2>1. 数据结构</h2>
-    <h3 class="route">ImageObject</h3>
+    <h3 class="route">ImageObject（列表接口）</h3>
     <pre>{
   "id": 123,
   "title": "string",
@@ -20,7 +20,7 @@
   "source_id": 999,
   "aspect_ratio": 1.33,
   "primary_color": [12, 23, 34],
-  "accessable": true,
+  "accessible": true,
   "author": {
     "id": 1,
     "name": "string",
@@ -39,25 +39,22 @@
   "aspect_ratio": 1.333,
   "source_id": 999,
   "source_url": "https://...",
-  "author": [
-    {
-      "id": 1,
-      "name": "string",
-      "homepage": "https://...",
-      "platform": "pixiv"
-    }
-  ],
+  "author": {
+    "id": 1,
+    "name": "string",
+    "platform": "pixiv",
+    "platform_id": 123456
+  },
   "tags": [
-    { "id": 1, "name": "猫耳", "num": 888 }
+    { "id": 1, "name": "猫耳", "translated_name": "猫耳" }
   ],
   "colors": {
-    "color_primary": [123, 100, 233],
-    "color_series": [[123, 100, 233], [20, 20, 20]]
+    "colors": [[24, 20, 34], [41, 35, 56], [63, 54, 89], [84, 71, 121],
+               [103, 86, 148], [123, 100, 233], [149, 126, 238], [177, 157, 243],
+               [205, 191, 247], [230, 221, 252]]
   },
-  "accessable": true,
-  "uploaded": true,
-  "processed": true,
-  "processing": false
+  "primary_color": [123, 100, 233],
+  "accessible": true,
 }</pre>
 
 
@@ -66,15 +63,12 @@
       每张图片都带有颜色分析结果，可直接用于主题适配、按钮取色、背景渐变、推荐色卡等场景。
     </p>
     <ul>
-      <li><code>colors.color_primary</code>：主色（Primary Color），默认代表该图最具视觉代表性的颜色。</li>
-      <li><code>colors.color_series</code>：调色盘数组，固定包含 10 组 RGB 颜色。</li>
-      <li><code>color_series</code> 的 10 个颜色按灰度（明度）排序，通常可理解为从更暗到更亮的渐进序列。</li>
-      <li>前端可以直接按序渲染色条，或将第 1~3 个暗色用于文字背景、第 8~10 个亮色用于高亮元素。</li>
+      <li><code>colors.colors</code>：调色盘数组，固定包含 10 组 RGB 颜色，按灰度排序。</li>
+      <li><code>primary_color</code>：主色 RGB 数组 <code>[r, g, b]</code>，用于背景色或主题色。</li>
     </ul>
     <pre>{
   "colors": {
-    "color_primary": [123, 100, 233],
-    "color_series": [
+    "colors": [
       [24, 20, 34],
       [41, 35, 56],
       [63, 54, 89],
@@ -112,19 +106,19 @@
         <li><code>desc</code>: 是否降序（默认 true）</li>
         <li><code>ratio_floor</code>, <code>ratio_ceil</code>: 宽高比筛选（默认 0~10）</li>
         <li><code>author</code>: 作者 ID 或名字</li>
-        <li><code>accessable</code>: <code>true</code>/<code>false</code>/<code>all</code></li>
+        <li><code>accessible</code>: <code>true</code>/<code>false</code>/<code>all</code></li>
         <li><code>tags</code>: 标签名，多个以逗号拼接</li>
       </ul>
-      <p>未携带有效 token 时，仅返回 <code>accessable=true</code> 的图片。</p>
+      <p>未携带有效 token 时，仅返回 <code>accessible=true</code> 的图片。</p>
 
       <h3 class="route">GET /image/{image_id}</h3>
       <p>按 ID 获取图片；支持 JSON 或图片重定向（307）。</p>
 
       <h3 class="route">PATCH /image/{image_id}</h3>
-      <p>更新图片信息（需鉴权）。前端当前主要用于更新 <code>accessable</code>。</p>
+      <p>更新图片信息（需鉴权）。前端当前主要用于更新 <code>accessible</code>。</p>
 
       <h3 class="route">POST /token</h3>
-      <p>管理员登录接口，提交 <code>username</code>、<code>password</code>。</p>
+      <p>管理员登录接口，提交 JSON body <code>{"username": "...", "password": "..."}</code>。</p>
       <pre>{ "access_token": "...", "token_type": "bearer" }</pre>
 
       <h3 class="route">GET /tags</h3>
