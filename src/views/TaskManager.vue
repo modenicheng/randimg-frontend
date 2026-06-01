@@ -181,12 +181,11 @@ const showError = (text: string) => {
 
 const taskTitle = (t: Task): string => {
   const label = jobLabel[t.job_type] ?? t.job_type;
-  const shortId = t.id.slice(0, 8);
   let hint = '';
   if (t.payload?.target_user_id) hint = `user: ${t.payload.target_user_id}`;
   else if (t.payload?.target_start_date) hint = `${t.payload.target_start_date} ~ ${t.payload.target_end_date ?? ''}`;
   else if (t.payload?.image_id) hint = `image #${t.payload.image_id}`;
-  return `${label}任务 #${shortId}${hint ? ': ' + hint : ''}`;
+  return `${label}${hint ? ': ' + hint : ''}`;
 };
 
 const formatDate = (s: string | null) => {
