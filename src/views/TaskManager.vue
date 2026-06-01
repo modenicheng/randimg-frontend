@@ -142,7 +142,7 @@ const submitCreate = async () => {
     if (createForm.value.target_end_date) body.target_end_date = createForm.value.target_end_date;
     if (createForm.value.target_search_prompt) body.target_search_prompt = createForm.value.target_search_prompt;
 
-    await Axios.post('/tasks/crawl', body);
+    await Axios.post('/crawler', body);
     createDialog.value = false;
     snackbar.value = { show: true, text: '爬取任务已提交', color: 'success' };
     await fetchTasks();
