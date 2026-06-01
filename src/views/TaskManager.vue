@@ -355,8 +355,8 @@ onMounted(fetchTasks);
 
     <!-- Pagination -->
     <div v-if="totalPages > 1" class="d-flex flex-column align-center mt-4">
-      <v-pagination v-model="page" :length="totalPages" :disabled="loading" @update:model-value="fetchTasks"
-        rounded="circle" />
+      <v-pagination v-model="page" :length="totalPages" :total-visible="5" :disabled="loading"
+        @update:model-value="fetchTasks" rounded="circle" />
       <span class="text-caption text-medium-emphasis mt-1">第 {{ page }} / {{ totalPages }} 页</span>
     </div>
 
