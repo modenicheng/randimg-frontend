@@ -71,6 +71,7 @@ const statusColors: Record<number, string> = {
 
 const fetchCredentials = async () => {
   loading.value = true;
+  credentials.value = [];
   try {
     const res = await Axios.get('/pixiv-credential');
     if (res.status === 200) credentials.value = res.data;
@@ -165,7 +166,12 @@ onMounted(fetchCredentials);
       </v-col>
     </v-row>
 
-    <v-data-table :items="credentials" :loading="loading" item-key="id" :headers="[
+    <!-- Skeleton loading -->
+    <template v-if="loading">
+      <v-skeleton-loader v-for="i in 4" :key="i" type="table-row-divider" class="mb-1" />
+    </template>
+
+    <v-data-table v-else :items="credentials" item-key="id" :headers="[
       { title: 'ID', key: 'id', width: 60 },
       { title: 'Pixiv 用户 ID', key: 'pixiv_user_id' },
       { title: '状态', key: 'status', width: 100 },

@@ -111,6 +111,7 @@ const sortedTasks = computed(() =>
 
 const fetchTasks = async () => {
   loading.value = true;
+  tasks.value = [];
   try {
     const params: Record<string, any> = {
       limit: pageSize,
@@ -275,9 +276,12 @@ onMounted(fetchTasks);
 
     <!-- Accordion task list -->
     <div style="max-height: 65vh; overflow-y: auto;">
-      <v-progress-linear v-if="loading" indeterminate color="primary" class="mb-2" />
+      <!-- Skeleton loading -->
+      <template v-if="loading">
+        <v-skeleton-loader v-for="i in 5" :key="i" type="list-item-two-line" class="mb-1" />
+      </template>
 
-      <v-expansion-panels v-if="sortedTasks.length > 0" variant="accordion" multiple>
+      <v-expansion-panels v-else-if="sortedTasks.length > 0" variant="accordion" multiple>
         <v-expansion-panel v-for="task in sortedTasks" :key="task.id">
           <v-expansion-panel-title class="pa-3">
             <div class="d-flex align-center" style="width: 100%; min-width: 0;">
@@ -346,7 +350,7 @@ onMounted(fetchTasks);
         </v-expansion-panel>
       </v-expansion-panels>
 
-      <v-alert v-else-if="!loading" type="info" variant="tonal" class="mt-2">暂无任务</v-alert>
+      <v-alert v-else type="info" variant="tonal" class="mt-2">暂无任务</v-alert>
     </div>
 
     <!-- Pagination -->
