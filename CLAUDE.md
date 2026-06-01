@@ -20,6 +20,7 @@ This is a **Vue 3 + TypeScript + Vite** single-page application frontend for a r
 - **State Management**: Pinia with `pinia-plugin-persistedstate` for localStorage persistence
 - **Routing**: Vue Router 4 with HTML5 history mode
 - **HTTP Client**: Axios with a shared instance in `src/axios/axios.ts`
+- **TypeScript**: Strict mode with `noUnusedLocals`, `noUnusedParameters`, `noFallthroughCasesInSwitch`
 
 ### Layout Structure
 

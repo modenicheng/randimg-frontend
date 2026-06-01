@@ -58,12 +58,10 @@ const jobLabel: Record<string, string> = {
 
 const typeItems = [
   { title: '全部', value: null },
-  { title: '爬取', value: 'crawl' },
-  { title: '下载', value: 'download' },
-  { title: '颜色提取', value: 'color_extract' },
-  { title: '上传', value: 'upload' },
-  { title: '合规检查', value: 'accessibility_check' },
-  { title: '发现', value: 'discover' },
+  { title: '爬取：按用户', value: 'crawl:1' },
+  { title: '爬取：按收藏', value: 'crawl:2' },
+  { title: '爬取：按日榜', value: 'crawl:0' },
+  { title: '凭证更新', value: 'refresh-pixiv-token' },
 ];
 
 const statusItems = [
@@ -91,7 +89,7 @@ const rootTasks   = ref<Task[]>([]);
 const total         = ref(0);
 const page          = ref(1);
 const loading       = ref(false);
-const pageSize      = ref(20);
+const pageSize      = ref(10);
 const filterType    = ref<string | null>(null);
 const filterStatus  = ref<string | null>(null);
 
@@ -171,8 +169,16 @@ const parseTask = (raw: any): Task => ({
 
 let fetchGeneration = 0;
 
+/** Parse composite type filter value (e.g. "crawl:1") into API params. */
+const parseTypeFilter = (value: string | null): Record<string, any> => {
+  if (!value) return {};
+  const colonIdx = value.indexOf(':');
+  if (colonIdx === -1) return { task_type: value };
+  return { task_type: value.slice(0, colonIdx), crawl_type: parseInt(value.slice(colonIdx + 1), 10) };
+};
+
 const fetchRoots = async (opts?: { preserveExpanded?: boolean; silent?: boolean }) => {
-  const gen = opts?.silent ? fetchGeneration : ++fetchGeneration;
+  const gen = ++fetchGeneration;
   if (!opts?.silent) {
     loading.value = true;
     rootTasks.value = [];
@@ -190,7 +196,7 @@ const fetchRoots = async (opts?: { preserveExpanded?: boolean; silent?: boolean 
       limit:  pageSize.value,
       offset: (page.value - 1) * pageSize.value,
     };
-    if (filterType.value) params.task_type = filterType.value;
+    Object.assign(params, parseTypeFilter(filterType.value));
     if (filterStatus.value) params.status = filterStatus.value;
 
     const res = await Axios.get('/tasks/roots', { params });
@@ -203,7 +209,7 @@ const fetchRoots = async (opts?: { preserveExpanded?: boolean; silent?: boolean 
   } catch (e: any) {
     showError(e.response?.data?.message ?? '加载失败');
   } finally {
-    if (fetchGeneration === gen) {
+    if (!opts?.silent && fetchGeneration === gen) {
       loading.value = false;
     }
   }
@@ -219,7 +225,10 @@ const fetchSubtasks = async (rootId: string, silent = false) => {
       limit:  state.pageSize,
       offset: (state.page - 1) * state.pageSize,
     };
-    if (state.filterType) params.task_type = state.filterType;
+    if (state.filterType) {
+      const colonIdx = state.filterType.indexOf(':');
+      params.task_type = colonIdx === -1 ? state.filterType : state.filterType.slice(0, colonIdx);
+    }
 
     const res = await Axios.get(`/tasks/${rootId}/subtasks`, { params });
     if (res.status === 200) {
@@ -311,7 +320,10 @@ const confirmCancel = async () => {
       await fetchRoots({ preserveExpanded: true });
     } else {
       const rootId = (cancelDialog as any)._rootId as string;
-      if (rootId) await refreshSubtask(rootId);
+      if (rootId) {
+        await refreshSubtask(rootId);
+        await fetchRoots({ preserveExpanded: true });
+      }
     }
   } catch (e: any) {
     showError(e.response?.data?.message ?? '取消操作失败');
@@ -343,7 +355,7 @@ const confirmCleanAll = async () => {
   cleaning.value = true;
   try {
     const body: Record<string, any> = { flags: cleanFlags.value };
-    if (cleanType.value) body.task_type = cleanType.value;
+    Object.assign(body, parseTypeFilter(cleanType.value));
     const res = await Axios.post('/tasks/clean', body);
     snackbar.value = {
       show: true,
@@ -385,7 +397,10 @@ const confirmInterrupt = async () => {
     const rootId = interruptId.value;
     const params: Record<string, any> = {};
     const subFilter = subtaskMap[rootId]?.filterType;
-    if (subFilter) params.task_type = subFilter;
+    if (subFilter) {
+      const colonIdx = subFilter.indexOf(':');
+      params.task_type = colonIdx === -1 ? subFilter : subFilter.slice(0, colonIdx);
+    }
 
     const res = await Axios.delete(`/tasks/${rootId}/subtasks`, { params });
     snackbar.value = {
@@ -977,7 +992,7 @@ onUnmounted(() => {
           <template v-if="interruptId && subtaskMap[interruptId]?.filterType">
             <br />
             <strong>当前类型筛选：</strong>
-            {{ jobLabel[subtaskMap[interruptId].filterType!] ?? subtaskMap[interruptId].filterType }}
+            {{ typeItems.find(i => i.value === subtaskMap[interruptId!]?.filterType)?.title ?? subtaskMap[interruptId!]?.filterType }}
           </template>
           <br />确定继续吗？
         </v-card-text>
