@@ -26,6 +26,8 @@ const filterStatus = ref<string | null>(null);
 
 const createDialog = ref(false);
 const creating = ref(false);
+const cancelAllDialog = ref(false);
+const cancellingAll = ref(false);
 const createForm = ref({
   crawler_id: 1,
   crawl_type: 1,
@@ -175,6 +177,26 @@ const retryTask = async (id: string) => {
   }
 };
 
+const cancelAllTasks = async () => {
+  cancellingAll.value = true;
+  try {
+    const params: Record<string, any> = {};
+    if (filterType.value) params.task_type = filterType.value;
+    const res = await Axios.delete('/tasks/pending', { params });
+    cancelAllDialog.value = false;
+    snackbar.value = {
+      show: true,
+      text: `已取消 ${res.data.deleted ?? 0} 个任务`,
+      color: 'success',
+    };
+    await fetchTasks();
+  } catch (e: any) {
+    showError(e.response?.data?.message ?? '取消失败');
+  } finally {
+    cancellingAll.value = false;
+  }
+};
+
 const showError = (text: string) => {
   snackbar.value = { show: true, text, color: 'error' };
 };
@@ -211,7 +233,8 @@ onMounted(fetchTasks);
       <v-col>
         <h2>任务管理</h2>
       </v-col>
-      <v-col cols="auto">
+      <v-col cols="auto" class="d-flex ga-2">
+        <v-btn color="error" variant="outlined" @click="cancelAllDialog = true">取消所有任务</v-btn>
         <v-btn color="primary" @click="createDialog = true">创建任务</v-btn>
       </v-col>
     </v-row>
@@ -338,6 +361,21 @@ onMounted(fetchTasks);
           <v-spacer />
           <v-btn text="取消" @click="createDialog = false" />
           <v-btn color="primary" text="提交" :loading="creating" @click="submitCreate" />
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- Cancel All Confirmation Dialog -->
+    <v-dialog v-model="cancelAllDialog" max-width="420">
+      <v-card>
+        <v-card-title>确认取消所有任务</v-card-title>
+        <v-card-text>
+          此操作将删除所有待处理的任务{{ filterType ? `（类型: ${jobLabel[filterType] ?? filterType}）` : '' }}，不可撤销。确定继续吗？
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn text="返回" @click="cancelAllDialog = false" />
+          <v-btn color="error" text="确认取消" :loading="cancellingAll" @click="cancelAllTasks" />
         </v-card-actions>
       </v-card>
     </v-dialog>
