@@ -29,9 +29,9 @@
     <v-card class="info" :style="{
       width: `${imgShowWidth}px`,
     }">
-      <div class="info" v-if="imageDetailData">
-        <h1>{{ imageDetailData.title }}</h1>
-        <div class="tags">
+      <div class="info">
+        <h1 class="text-h4">{{ imageDetailData.title }}</h1>
+        <div class="d-flex flex-wrap ga-2">
           <v-chip class="tag" v-for="tag of imageDetailData.tags" :key="tag.id">
             <div class="tag-info">
               <div>{{ tag.name }}</div>
@@ -40,28 +40,24 @@
           </v-chip>
         </div>
         <v-divider></v-divider>
-        <div class="author" style="margin-top: 1rem">
-          <h3>画师信息 / Author</h3>
-          <div class="name">{{ imageDetailData.author.name }}</div>
-          <div class="platform">{{ imageDetailData.author.platform }}</div>
-          <div>{{ imageDetailData.author.platform_id }}</div>
-          <div class="link" @click="toUrl(`https://www.pixiv.net/users/${imageDetailData.author.platform_id}`)">
-            画师主页 - {{ `https://www.pixiv.net/users/${imageDetailData.author.platform_id}` }}
-          </div>
+        <div class="author mt-4">
+          <h3 class="text-h6">画师信息 / Author</h3>
+          <div class="text-body-1 font-weight-medium">{{ imageDetailData.author.name }}</div>
+          <div class="text-body-2">{{ imageDetailData.author.platform }}</div>
+          <div class="text-body-2">{{ imageDetailData.author.platform_id }}</div>
+          <v-btn variant="text" density="compact" @click="toUrl(`https://www.pixiv.net/users/${imageDetailData.author.platform_id}`)"><v-icon size="small" class="mr-1">mdi-open-in-new</v-icon>画师主页</v-btn>
         </div>
-        <div style="margin-top: 1rem" class="origin">
-          <h3>原作信息 / Origin</h3>
-          <div class="link" @click="toUrl(imageDetailData.source_url)">
-            图片源/Source - {{ imageDetailData.source_url }}
-          </div>
-          <div>
+        <div class="origin mt-4">
+          <h3 class="text-h6">原作信息 / Origin</h3>
+          <v-btn variant="text" density="compact" @click="toUrl(imageDetailData.source_url)"><v-icon size="small" class="mr-1">mdi-open-in-new</v-icon>图片源/Source</v-btn>
+          <div class="text-body-2">
             分辨率/Resolution: {{ imageDetailData.width }}×{{ imageDetailData.height }}
           </div>
-          <div>宽高比/AspectRatio: {{ imageDetailData.aspect_ratio }}</div>
+          <div class="text-body-2">宽高比/AspectRatio: {{ imageDetailData.aspect_ratio }}</div>
         </div>
       </div>
       <v-card-actions>
-        <v-btn style="font-weight: bold" @click="toUrl(imageDetailData.src)" text="在新标签页中打开此图像"></v-btn>
+        <v-btn class="font-weight-bold" @click="toUrl(imageDetailData.src)" text="在新标签页中打开此图像"></v-btn>
       </v-card-actions>
     </v-card>
   </div>
@@ -87,7 +83,6 @@ const getImageDetail = async () => {
     d.colors = { colors: d.colors.map((c: any) => c.rgb) }
   }
   imageDetailData.value = d;
-  // 计算宽高
   if (imageDetailData.value.aspect_ratio < 0.7) {
     imgShowHeight.value = 0.8 * window.innerHeight;
     imgShowWidth.value = imgShowHeight.value * imageDetailData.value.aspect_ratio;

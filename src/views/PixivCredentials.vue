@@ -26,32 +26,26 @@ const dialogOpen = ref(false);
 const editMode = ref(false);
 const editId = ref<number | null>(null);
 
-// 表单
 const form = ref({
   pixiv_user_id: '',
   refresh_token: '',
   note: '',
 });
 
-// 编辑表单（PATCH）
 const editForm = ref({
   refresh_token: '',
   status: 0,
   note: '',
 });
 
-// token 查看弹窗
 const tokenDialog = ref(false);
 const tokenLoading = ref(false);
 const tokenData = ref<CredentialToken | null>(null);
 
-// 刷新状态
 const refreshingId = ref<number | null>(null);
 
-// Snackbar
 const snackbar = ref({ show: false, text: '', color: 'success' });
 
-// 删除确认弹窗
 const deleteDialog = ref(false);
 const deleteId = ref<number | null>(null);
 
@@ -159,7 +153,7 @@ onMounted(fetchCredentials);
   <v-container>
     <v-row align="center" class="mb-4">
       <v-col>
-        <h2>Pixiv 凭证管理</h2>
+        <h2 class="text-h5">Pixiv 凭证管理</h2>
       </v-col>
       <v-col cols="auto">
         <v-btn color="primary" @click="openCreate">添加凭证</v-btn>
@@ -236,15 +230,15 @@ onMounted(fetchCredentials);
       <v-card :loading="tokenLoading">
         <v-card-title>凭证 Token</v-card-title>
         <v-card-text v-if="tokenData">
-          <div class="mb-2"><strong>ID:</strong> {{ tokenData.id }}</div>
-          <div class="mb-2"><strong>Pixiv User ID:</strong> {{ tokenData.pixiv_user_id }}</div>
+          <div class="mb-2"><span class="font-weight-bold">ID:</span> {{ tokenData.id }}</div>
+          <div class="mb-2"><span class="font-weight-bold">Pixiv User ID:</span> {{ tokenData.pixiv_user_id }}</div>
           <div class="mb-2">
-            <strong>Refresh Token:</strong>
-            <code class="d-block mt-1" style="word-break: break-all; white-space: pre-wrap;">{{ tokenData.refresh_token }}</code>
+            <span class="font-weight-bold">Refresh Token:</span>
+            <div class="mt-1"><v-chip variant="outlined" size="small" class="font-weight-bold" style="word-break: break-all; white-space: pre-wrap; max-width: 100%; height: auto;"><code class="text-primary font-weight-bold" style="font-family: monospace;">{{ tokenData.refresh_token }}</code></v-chip></div>
           </div>
           <div>
-            <strong>Access Token:</strong>
-            <code class="d-block mt-1" style="word-break: break-all; white-space: pre-wrap;">{{ tokenData.access_token ?? '(无)' }}</code>
+            <span class="font-weight-bold">Access Token:</span>
+            <div class="mt-1"><v-chip variant="outlined" size="small" class="font-weight-bold" style="word-break: break-all; white-space: pre-wrap; max-width: 100%; height: auto;"><code class="text-primary font-weight-bold" style="font-family: monospace;">{{ tokenData.access_token ?? '(无)' }}</code></v-chip></div>
           </div>
         </v-card-text>
         <v-card-actions>

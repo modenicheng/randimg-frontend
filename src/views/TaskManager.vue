@@ -1,11 +1,7 @@
 <script setup lang="ts">
 import Axios from '../axios/axios';
 import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue';
-import { mdiPlus, mdiCancel } from '@mdi/js';
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+import { mdiPlus, mdiCancel, mdiStopCircleOutline, mdiBroom } from '@mdi/js';
 
 /** Core task data returned by both /tasks/roots and /tasks/{id}/subtasks. */
 interface Task {
@@ -29,10 +25,6 @@ interface SubtaskState {
   loaded: boolean;         // true after first load → only re-fetch on explicit action
   filterType: string | null;
 }
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
 
 const statusColor: Record<string, string> = {
   pending:   'blue',
@@ -90,10 +82,6 @@ const statusOrder: Record<string, number> = {
   running: 0, pending: 1, failed: 2, killed: 3, completed: 4,
 };
 
-// ---------------------------------------------------------------------------
-// Refs
-// ---------------------------------------------------------------------------
-
 const rootTasks   = ref<Task[]>([]);
 const total         = ref(0);
 const page          = ref(1);
@@ -120,20 +108,36 @@ const interruptDialog = ref(false);
 const interruptId     = ref<string | null>(null);
 const interrupting    = ref(false);
 
+const cancelAllDialog = ref(false);
+const cancellingAll   = ref(false);
+
+const cleanDialog  = ref(false);
+const cleaning     = ref(false);
+const cleanFlags   = ref<string[]>([]);
+const cleanType    = ref<string | null>(null);
+
+const cleanFlagItems = [
+  { title: '已完成', value: 'completed' },
+  { title: '失败', value: 'failed' },
+  { title: '已取消', value: 'cancelled' },
+  { title: '待处理', value: 'pending' },
+  { title: '运行中', value: 'running' },
+];
+
 const scrollContainer = ref<HTMLElement | null>(null);
 
 const createForm = ref({
   crawler_id:          1,
   crawl_type:           1,
   target_user_id:      '',
-  target_start_date:   '',
-  target_end_date:     '',
+  target_start_date:   null as Date | null,
+  target_end_date:     null as Date | null,
   target_search_prompt: '',
 });
 
 const snackbar = ref({ show: false, text: '', color: 'error' });
 
-const requiredRule = [(v: any) => !!v || '此项为必填'];
+const requiredRule = [(v: any) => v !== null && v !== undefined && v !== '' || '此项为必填'];
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)));
 
@@ -141,9 +145,8 @@ const sortedRoots = computed(() =>
   [...rootTasks.value].sort((a, b) => (statusOrder[a.status] ?? 9) - (statusOrder[b.status] ?? 9)),
 );
 
-// ---------------------------------------------------------------------------
-// Data fetching
-// ---------------------------------------------------------------------------
+/** Derived: root IDs whose panels should be shown as expanded (for :model-value binding). */
+const expandedIds = computed(() => [...expandedRoots.value]);
 
 /** Parse a backend task object (camelCase) into our Task interface. */
 const parseTask = (raw: any): Task => ({
@@ -159,10 +162,17 @@ const parseTask = (raw: any): Task => ({
   payload:    raw.payload,
 });
 
-const fetchRoots = async () => {
+const fetchRoots = async (opts?: { preserveExpanded?: boolean }) => {
   loading.value = true;
   rootTasks.value = [];
   scrollContainer.value?.scrollTo({ top: 0 });
+  if (!opts?.preserveExpanded) {
+    // Clear expansion & subtask state on page / filter change
+    expandedRoots.value = new Set();
+    for (const key of Object.keys(subtaskMap)) {
+      delete subtaskMap[key];
+    }
+  }
   try {
     const params: Record<string, any> = {
       limit:  pageSize.value,
@@ -210,16 +220,13 @@ watch([filterType, filterStatus], () => {
   fetchRoots();
 });
 
-// ---------------------------------------------------------------------------
-// Panel lifecycle
-// ---------------------------------------------------------------------------
-
-/** Called by v-expansion-panels @update:modelValue. */
-const onRootExpandChange = (openIds: string | string[]) => {
-  const ids = Array.isArray(openIds) ? openIds : openIds ? [openIds] : [];
+/** Called by v-expansion-panels @update:modelValue (bound via :model-value for persistence). */
+const onRootExpandChange = (openIds: unknown) => {
+  const ids: string[] = Array.isArray(openIds)
+    ? openIds.filter((x): x is string => typeof x === 'string')
+    : typeof openIds === 'string' ? [openIds] : [];
   const newSet = new Set(ids);
 
-  // Detect newly expanded panels and init subtask state
   for (const id of newSet) {
     if (!subtaskMap[id]) {
       subtaskMap[id] = {
@@ -243,10 +250,6 @@ const refreshSubtask = async (rootId: string) => {
     await fetchSubtasks(rootId, true);
   }
 };
-
-// ---------------------------------------------------------------------------
-// Dialogs
-// ---------------------------------------------------------------------------
 
 const applySubtaskFilter = (rootId: string) => {
   fetchSubtasks(rootId);
@@ -273,7 +276,7 @@ const confirmCancel = async () => {
     snackbar.value = { show: true, text: '任务已取消', color: 'success' };
 
     if (cancelIsRoot.value) {
-      await fetchRoots();
+      await fetchRoots({ preserveExpanded: true });
     } else {
       const rootId = (cancelDialog as any)._rootId as string;
       if (rootId) await refreshSubtask(rootId);
@@ -293,6 +296,55 @@ const openInterruptSubtasks = (rootId: string) => {
   interruptDialog.value = true;
 };
 
+const openCancelAll = () => {
+  cancelAllDialog.value = true;
+};
+
+const openCleanAll = () => {
+  cleanFlags.value = ['completed', 'failed', 'cancelled'];
+  cleanType.value  = null;
+  cleanDialog.value = true;
+};
+
+const confirmCleanAll = async () => {
+  if (cleanFlags.value.length === 0) return;
+  cleaning.value = true;
+  try {
+    const body: Record<string, any> = { flags: cleanFlags.value };
+    if (cleanType.value) body.taskType = cleanType.value;
+    const res = await Axios.post('/tasks/clean', body);
+    snackbar.value = {
+      show: true,
+      text: `已清理 ${res.data.deleted ?? 0} 个任务`,
+      color: 'success',
+    };
+    await fetchRoots();
+  } catch (e: any) {
+    showError(e.response?.data?.message ?? '清理任务失败');
+  } finally {
+    cleaning.value     = false;
+    cleanDialog.value  = false;
+  }
+};
+
+const confirmCancelAll = async () => {
+  cancellingAll.value = true;
+  try {
+    const res = await Axios.delete('/tasks/pending');
+    snackbar.value = {
+      show: true,
+      text: `已终止 ${res.data.deleted ?? 0} 个任务`,
+      color: 'success',
+    };
+    await fetchRoots();
+  } catch (e: any) {
+    showError(e.response?.data?.message ?? '终止所有任务失败');
+  } finally {
+    cancellingAll.value   = false;
+    cancelAllDialog.value = false;
+  }
+};
+
 /** Confirm: delete all pending subtasks of the root. */
 const confirmInterrupt = async () => {
   if (!interruptId.value) return;
@@ -310,7 +362,7 @@ const confirmInterrupt = async () => {
       color: 'success',
     };
     await refreshSubtask(rootId);
-    await fetchRoots();  // Also refresh root (status might change)
+    await fetchRoots({ preserveExpanded: true });  // Also refresh root (status might change)
   } catch (e: any) {
     showError(e.response?.data?.message ?? '批量取消失败');
   } finally {
@@ -320,9 +372,8 @@ const confirmInterrupt = async () => {
   }
 };
 
-// ---------------------------------------------------------------------------
-// Create
-// ---------------------------------------------------------------------------
+/** Format a Date to "YYYY-MM-DD" for the backend */
+const fmtDate = (d: Date) => d.toISOString().slice(0, 10);
 
 const submitCreate = async () => {
   const { valid } = await createFormRef.value?.validate();
@@ -330,16 +381,19 @@ const submitCreate = async () => {
   creating.value = true;
   try {
     const body: any = {
-      crawler_id: createForm.value.crawler_id,
+      crawler_id:  createForm.value.crawler_id,
       crawl_type:  createForm.value.crawl_type,
     };
     if (createForm.value.target_user_id)       body.target_user_id       = createForm.value.target_user_id;
-    if (createForm.value.target_start_date)    body.target_start_date    = createForm.value.target_start_date;
-    if (createForm.value.target_end_date)      body.target_end_date      = createForm.value.target_end_date;
+    // v-date-input returns Date objects; backend expects NaiveDateTime "YYYY-MM-DDTHH:MM:SS"
+    if (createForm.value.target_start_date)    body.target_start_date    = fmtDate(createForm.value.target_start_date) + 'T00:00:00';
+    if (createForm.value.target_end_date)      body.target_end_date      = fmtDate(createForm.value.target_end_date)   + 'T00:00:00';
     if (createForm.value.target_search_prompt) body.target_search_prompt = createForm.value.target_search_prompt;
 
     await Axios.post('/crawler', body);
     createDialog.value = false;
+    createForm.value.target_start_date = null;
+    createForm.value.target_end_date   = null;
     snackbar.value = { show: true, text: '爬取任务已提交', color: 'success' };
     await fetchRoots();
   } catch (e: any) {
@@ -348,10 +402,6 @@ const submitCreate = async () => {
     creating.value = false;
   }
 };
-
-// ---------------------------------------------------------------------------
-// Utilities
-// ---------------------------------------------------------------------------
 
 const showError = (text: string) => {
   snackbar.value = { show: true, text, color: 'error' };
@@ -383,30 +433,30 @@ const formatJson = (v: any): string => {
 const pendingCount = (items?: Task[]) =>
   (items ?? []).filter(t => t.status === 'pending').length;
 
-// ---------------------------------------------------------------------------
-// Lifecycle
-// ---------------------------------------------------------------------------
-
 onMounted(fetchRoots);
 </script>
 
 <template>
   <v-container>
 
-    <!-- ── Header ──────────────────────────────────────────────────────── -->
     <v-row align="center" class="mb-4">
       <v-col>
-        <h2>任务管理</h2>
+        <h2 class="text-h5">任务管理</h2>
         <span class="text-caption text-medium-emphasis">共 {{ total }} 条根任务</span>
       </v-col>
       <v-col cols="auto" class="d-flex ga-2">
+        <v-btn color="error" variant="outlined" :prepend-icon="mdiStopCircleOutline" @click="openCancelAll">
+          终止所有任务
+        </v-btn>
+        <v-btn color="warning" variant="outlined" :prepend-icon="mdiBroom" @click="openCleanAll">
+          清理任务
+        </v-btn>
         <v-btn color="primary" :prepend-icon="mdiPlus" @click="createDialog = true">
           创建任务
         </v-btn>
       </v-col>
     </v-row>
 
-    <!-- ── Filters ───────────────────────────────────────────────────── -->
     <v-row dense class="mb-4" align="center">
       <v-col cols="12" sm="6">
         <v-select
@@ -432,7 +482,6 @@ onMounted(fetchRoots);
       </v-col>
     </v-row>
 
-    <!-- ── Root task list ─────────────────────────────────────────────── -->
     <div ref="scrollContainer" class="task-scroll-container">
       <template v-if="loading">
         <v-skeleton-loader v-for="i in 5" :key="i" type="list-item-two-line" class="mb-2" />
@@ -440,6 +489,7 @@ onMounted(fetchRoots);
 
       <v-expansion-panels
         v-else-if="sortedRoots.length > 0"
+        :model-value="expandedIds"
         variant="accordion"
         multiple
         @update:model-value="onRootExpandChange"
@@ -450,9 +500,8 @@ onMounted(fetchRoots);
           :value="root.id"
           class="mb-2"
         >
-          <!-- Root panel title -->
           <v-expansion-panel-title class="py-3 px-4">
-            <div class="d-flex align-center" style="width: 100%; min-width: 0;">
+            <div class="d-flex align-center w-100" style="min-width: 0">
               <v-chip
                 :color="statusColor[root.status] ?? 'grey'"
                 size="small"
@@ -461,7 +510,7 @@ onMounted(fetchRoots);
               >
                 {{ statusLabel[root.status] ?? root.status }}
               </v-chip>
-              <span class="font-weight-medium text-truncate" style="min-width: 0; flex: 1;">
+              <span class="font-weight-medium text-truncate flex-grow-1" style="min-width: 0">
                 {{ taskTitle(root) }}
               </span>
               <span class="text-caption text-medium-emphasis ml-3 flex-shrink-0">
@@ -470,7 +519,6 @@ onMounted(fetchRoots);
             </div>
           </v-expansion-panel-title>
 
-          <!-- Root panel content -->
           <v-expansion-panel-text>
 
             <!-- Basic info — 2-column grid -->
@@ -517,7 +565,6 @@ onMounted(fetchRoots);
               </v-expansion-panel>
             </v-expansion-panels>
 
-            <!-- Root action buttons -->
             <div class="d-flex ga-2 mb-4">
               <v-btn
                 v-if="root.status === 'pending'"
@@ -532,7 +579,6 @@ onMounted(fetchRoots);
 
             <v-divider class="mb-4" />
 
-            <!-- ── Subtask controls bar ─────────────────────────────── -->
             <div class="d-flex align-center mb-3 ga-3 flex-wrap">
               <span class="text-subtitle-2 font-weight-bold">子任务</span>
               <span
@@ -568,7 +614,6 @@ onMounted(fetchRoots);
               </v-btn>
             </div>
 
-            <!-- ── Subtask list (nested accordion) ─────────────────── -->
             <div v-if="subtaskMap[root.id]?.loading" class="py-2">
               <v-skeleton-loader v-for="j in 3" :key="j" type="list-item-two-line" class="mb-1" />
             </div>
@@ -674,7 +719,6 @@ onMounted(fetchRoots);
       <v-alert v-else type="info" variant="tonal" class="mt-2">暂无任务</v-alert>
     </div>
 
-    <!-- ── Pagination ───────────────────────────────────────────────────── -->
     <div v-if="totalPages > 1" class="d-flex flex-column align-center mt-4">
       <v-pagination
         v-model="page"
@@ -682,40 +726,41 @@ onMounted(fetchRoots);
         :total-visible="5"
         :disabled="loading"
         rounded="circle"
-        @update:model-value="fetchRoots"
+        @update:model-value="() => fetchRoots()"
       />
       <span class="text-caption text-medium-emphasis mt-1">
         第 {{ page }} / {{ totalPages }} 页
       </span>
     </div>
 
-    <!-- ── Create dialog ────────────────────────────────────────────────── -->
     <v-dialog v-model="createDialog" max-width="520">
       <v-card>
         <v-card-title>创建爬取任务</v-card-title>
         <v-card-text>
           <v-form ref="createFormRef" @submit.prevent="submitCreate">
             <v-text-field v-model.number="createForm.crawler_id" label="Crawler ID" type="number" :rules="requiredRule" />
-            <v-select v-model="createForm.crawl_type" :items="crawlTypeItems" label="爬取类型" :rules="requiredRule" />
+            <v-select v-model="createForm.crawl_type" :items="crawlTypeItems" item-title="title" item-value="value" label="爬取类型" :rules="requiredRule" />
             <v-text-field
               v-if="createForm.crawl_type === 1"
               v-model="createForm.target_user_id"
               label="目标用户 ID"
               :rules="requiredRule"
             />
-            <v-text-field
+            <v-date-input
               v-if="createForm.crawl_type === 0"
               v-model="createForm.target_start_date"
               label="开始日期"
-              type="date"
               :rules="requiredRule"
+              density="comfortable"
+              hide-details="auto"
             />
-            <v-text-field
+            <v-date-input
               v-if="createForm.crawl_type === 0"
               v-model="createForm.target_end_date"
               label="结束日期"
-              type="date"
               :rules="requiredRule"
+              density="comfortable"
+              hide-details="auto"
             />
             <v-text-field v-model="createForm.target_search_prompt" label="搜索关键词（可选）" />
           </v-form>
@@ -728,7 +773,70 @@ onMounted(fetchRoots);
       </v-card>
     </v-dialog>
 
-    <!-- ── Cancel single task dialog ────────────────────────────────────── -->
+    <v-dialog v-model="cancelAllDialog" max-width="440">
+      <v-card>
+        <v-card-title>终止所有任务</v-card-title>
+        <v-card-text>
+          将终止当前所有<strong>待处理</strong>状态的根任务及其子任务，此操作不可撤销。
+          <br />确定继续吗？
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn text="返回" @click="cancelAllDialog = false" />
+          <v-btn color="error" text="确认终止" :loading="cancellingAll" @click="confirmCancelAll" />
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <v-dialog v-model="cleanDialog" max-width="480">
+      <v-card>
+        <v-card-title>清理任务</v-card-title>
+        <v-card-text>
+          <p class="mb-3">选择要清理的任务状态，符合条件的任务将被永久删除。</p>
+          <v-chip-group v-model="cleanFlags" multiple column>
+            <v-chip
+              v-for="item in cleanFlagItems"
+              :key="item.value"
+              :value="item.value"
+              filter
+              variant="outlined"
+            >
+              {{ item.title }}
+            </v-chip>
+          </v-chip-group>
+          <v-select
+            v-model="cleanType"
+            :items="typeItems"
+            label="任务类型（可选，不选则清理所有类型）"
+            clearable
+            density="comfortable"
+            hide-details
+            class="mt-4"
+          />
+          <v-alert
+            v-if="cleanFlags.includes('running') || cleanFlags.includes('pending')"
+            type="warning"
+            variant="tonal"
+            density="compact"
+            class="mt-3"
+          >
+            包含运行中或待处理的任务，清理后将自动重启 Worker。
+          </v-alert>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn text="返回" @click="cleanDialog = false" />
+          <v-btn
+            color="warning"
+            text="确认清理"
+            :loading="cleaning"
+            :disabled="cleanFlags.length === 0"
+            @click="confirmCleanAll"
+          />
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <v-dialog v-model="cancelDialog" max-width="400">
       <v-card>
         <v-card-title>确认取消任务</v-card-title>
@@ -743,7 +851,6 @@ onMounted(fetchRoots);
       </v-card>
     </v-dialog>
 
-    <!-- ── Interrupt all pending subtasks dialog ────────────────────────── -->
     <v-dialog v-model="interruptDialog" max-width="420">
       <v-card>
         <v-card-title>取消所有待处理子任务</v-card-title>
@@ -769,7 +876,6 @@ onMounted(fetchRoots);
       </v-card>
     </v-dialog>
 
-    <!-- ── Snackbar ─────────────────────────────────────────────────────── -->
     <v-snackbar v-model="snackbar.show" :color="snackbar.color" timeout="3000" location="top">
       {{ snackbar.text }}
     </v-snackbar>
