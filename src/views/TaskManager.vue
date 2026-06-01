@@ -32,7 +32,7 @@ const statusColor: Record<string, string> = {
   pending:          'blue',
   running:          'orange',
   completed:        'green',
-  failed:           'orange',
+  failed:           'deep-purple',
   killed:           'red',
   partial_success:  'amber',
 };
