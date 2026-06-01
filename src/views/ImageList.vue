@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import Axios from "../axios/axios";
-import { onMounted, ref, nextTick } from 'vue';
+import { onMounted, onUnmounted, ref, nextTick } from 'vue';
 import { useUserStore } from "../store/store";
 import { mdiFilterOutline } from "@mdi/js";
 const store = useUserStore()
@@ -149,10 +149,14 @@ const loadData = async ({ done }: any) => {
     done("ok");
   }
 };
+const onResize = () => {
+  colWidth.value = Math.floor(window.innerWidth / 7.5);
+};
 onMounted(() => {
-  addEventListener("resize", () => {
-    colWidth.value = Math.floor(window.innerWidth / 7.5);
-  });
+  addEventListener("resize", onResize);
+});
+onUnmounted(() => {
+  removeEventListener("resize", onResize);
 });
 
 let overlay = ref(false);
@@ -207,6 +211,10 @@ const patchImage = (image: imageObject) => {
   Axios.patch(`/image/${image.id}`, { accessible: newValue }).then(res => {
     if (res.status === 200) {
       Object.assign(image, res.data)
+      // Re-normalize primary_color if it was overwritten with raw API format
+      if (res.data.primary_color && typeof res.data.primary_color === 'object' && 'rgb' in res.data.primary_color) {
+        image.primary_color = res.data.primary_color.rgb;
+      }
     }
   }).catch((e) => {
     console.error(e)
@@ -262,7 +270,7 @@ const getTags = () => {
 getTags()
 </script>
 <template>
-  <v-dialog max-width="600" @afterLeave="filterUpdate()">
+  <v-dialog max-width="600">
     <template v-slot:activator="{ props }">
       <v-fab v-bind="props" :icon='mdiFilterOutline' class='fab'>
       </v-fab>
@@ -297,7 +305,7 @@ getTags()
         <v-card-actions>
           <v-spacer></v-spacer>
           <v-btn text="应用" @click="filterUpdate()"></v-btn>
-          <v-btn text="确认" @click="isActive.value = false"></v-btn>
+          <v-btn text="确认" @click="filterUpdate(); isActive.value = false"></v-btn>
         </v-card-actions>
       </v-card>
     </template>

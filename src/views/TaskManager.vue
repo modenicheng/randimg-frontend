@@ -144,7 +144,7 @@ const createForm = ref({
 
 const snackbar = ref({ show: false, text: '', color: 'error' });
 
-const requiredRule = [(v: any) => v !== null && v !== undefined && v !== '' || '此项为必填'];
+const requiredRule = [(v: any) => (v !== null && v !== undefined && v !== '' && (!Array.isArray(v) || v.length > 0)) || '此项为必填'];
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)));
 
@@ -169,7 +169,10 @@ const parseTask = (raw: any): Task => ({
   payload:    raw.payload,
 });
 
+let fetchGeneration = 0;
+
 const fetchRoots = async (opts?: { preserveExpanded?: boolean; silent?: boolean }) => {
+  const gen = opts?.silent ? fetchGeneration : ++fetchGeneration;
   if (!opts?.silent) {
     loading.value = true;
     rootTasks.value = [];
@@ -192,13 +195,17 @@ const fetchRoots = async (opts?: { preserveExpanded?: boolean; silent?: boolean 
 
     const res = await Axios.get('/tasks/roots', { params });
     if (res.status === 200) {
-      rootTasks.value = (res.data.tasks ?? []).map(parseTask);
-      total.value      = res.data.total ?? 0;
+      if (fetchGeneration === gen) {
+        rootTasks.value = (res.data.tasks ?? []).map(parseTask);
+        total.value      = res.data.total ?? 0;
+      }
     }
   } catch (e: any) {
     showError(e.response?.data?.message ?? '加载失败');
   } finally {
-    loading.value = false;
+    if (fetchGeneration === gen) {
+      loading.value = false;
+    }
   }
 };
 
@@ -326,7 +333,7 @@ const openCancelAll = () => {
 };
 
 const openCleanAll = () => {
-  cleanFlags.value = ['completed', 'failed', 'cancelled'];
+  cleanFlags.value = ['completed', 'failed', 'killed'];
   cleanType.value  = null;
   cleanDialog.value = true;
 };
@@ -336,7 +343,7 @@ const confirmCleanAll = async () => {
   cleaning.value = true;
   try {
     const body: Record<string, any> = { flags: cleanFlags.value };
-    if (cleanType.value) body.taskType = cleanType.value;
+    if (cleanType.value) body.task_type = cleanType.value;
     const res = await Axios.post('/tasks/clean', body);
     snackbar.value = {
       show: true,
@@ -401,8 +408,8 @@ const confirmInterrupt = async () => {
 const fmtDate = (d: Date) => d.toISOString().slice(0, 10);
 
 const submitCreate = async () => {
-  const { valid } = await createFormRef.value?.validate();
-  if (!valid) return;
+  const result = await createFormRef.value?.validate();
+  if (!result?.valid) return;
   creating.value = true;
   try {
     const body: any = {
