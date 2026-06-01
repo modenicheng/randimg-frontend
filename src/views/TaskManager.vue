@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import Axios from '../axios/axios';
-import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue';
-import { mdiPlus, mdiCancel, mdiStopCircleOutline, mdiBroom } from '@mdi/js';
+import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
+import { mdiPlus, mdiCancel, mdiStopCircleOutline, mdiBroom, mdiChevronRight, mdiChevronDown } from '@mdi/js';
 
 /** Core task data returned by both /tasks/roots and /tasks/{id}/subtasks. */
 interface Task {
@@ -27,19 +27,21 @@ interface SubtaskState {
 }
 
 const statusColor: Record<string, string> = {
-  pending:   'blue',
-  running:   'orange',
-  completed: 'green',
-  failed:    'red',
-  killed:    'grey',
+  pending:          'blue',
+  running:          'orange',
+  completed:        'green',
+  failed:           'red',
+  killed:           'grey',
+  partial_success:  'amber',
 };
 
 const statusLabel: Record<string, string> = {
-  pending:   '待处理',
-  running:   '运行中',
-  completed: '已完成',
-  failed:    '失败',
-  killed:    '已取消',
+  pending:          '待处理',
+  running:          '运行中',
+  completed:        '已完成',
+  failed:           '失败',
+  killed:           '已取消',
+  partial_success:  '部分成功',
 };
 
 const jobLabel: Record<string, string> = {
@@ -69,6 +71,7 @@ const statusItems = [
   { title: '已完成', value: 'completed' },
   { title: '失败', value: 'failed' },
   { title: '已取消', value: 'killed' },
+  { title: '部分成功', value: 'partial_success' },
 ];
 
 const crawlTypeItems = [
@@ -79,7 +82,7 @@ const crawlTypeItems = [
 
 /** Sort priority: running → pending → failed/killed → completed */
 const statusOrder: Record<string, number> = {
-  running: 0, pending: 1, failed: 2, killed: 3, completed: 4,
+  running: 0, pending: 1, partial_success: 2, failed: 3, killed: 4, completed: 5,
 };
 
 const rootTasks   = ref<Task[]>([]);
@@ -118,20 +121,23 @@ const cleanType    = ref<string | null>(null);
 
 const cleanFlagItems = [
   { title: '已完成', value: 'completed' },
+  { title: '部分成功', value: 'partial_success' },
   { title: '失败', value: 'failed' },
-  { title: '已取消', value: 'cancelled' },
+  { title: '已取消', value: 'killed' },
   { title: '待处理', value: 'pending' },
   { title: '运行中', value: 'running' },
 ];
 
 const scrollContainer = ref<HTMLElement | null>(null);
+/** Polling timer ID — refetched every POLL_INTERVAL ms while any task is active. */
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+const POLL_INTERVAL = 5000; // 5 seconds
 
 const createForm = ref({
   crawler_id:          1,
   crawl_type:           1,
   target_user_id:      '',
-  target_start_date:   null as Date | null,
-  target_end_date:     null as Date | null,
+  target_date_range:   [] as Date[],
   target_search_prompt: '',
 });
 
@@ -162,10 +168,12 @@ const parseTask = (raw: any): Task => ({
   payload:    raw.payload,
 });
 
-const fetchRoots = async (opts?: { preserveExpanded?: boolean }) => {
-  loading.value = true;
-  rootTasks.value = [];
-  scrollContainer.value?.scrollTo({ top: 0 });
+const fetchRoots = async (opts?: { preserveExpanded?: boolean; silent?: boolean }) => {
+  if (!opts?.silent) {
+    loading.value = true;
+    rootTasks.value = [];
+    scrollContainer.value?.scrollTo({ top: 0 });
+  }
   if (!opts?.preserveExpanded) {
     // Clear expansion & subtask state on page / filter change
     expandedRoots.value = new Set();
@@ -385,15 +393,17 @@ const submitCreate = async () => {
       crawl_type:  createForm.value.crawl_type,
     };
     if (createForm.value.target_user_id)       body.target_user_id       = createForm.value.target_user_id;
-    // v-date-input returns Date objects; backend expects NaiveDateTime "YYYY-MM-DDTHH:MM:SS"
-    if (createForm.value.target_start_date)    body.target_start_date    = fmtDate(createForm.value.target_start_date) + 'T00:00:00';
-    if (createForm.value.target_end_date)      body.target_end_date      = fmtDate(createForm.value.target_end_date)   + 'T00:00:00';
+    // v-date-input range returns Date[]; backend expects NaiveDateTime "YYYY-MM-DDTHH:MM:SS"
+    const range = createForm.value.target_date_range;
+    if (range.length >= 2) {
+      body.target_start_date = fmtDate(range[0]) + 'T00:00:00';
+      body.target_end_date   = fmtDate(range[1]) + 'T00:00:00';
+    }
     if (createForm.value.target_search_prompt) body.target_search_prompt = createForm.value.target_search_prompt;
 
     await Axios.post('/crawler', body);
     createDialog.value = false;
-    createForm.value.target_start_date = null;
-    createForm.value.target_end_date   = null;
+    createForm.value.target_date_range = [];
     snackbar.value = { show: true, text: '爬取任务已提交', color: 'success' };
     await fetchRoots();
   } catch (e: any) {
@@ -433,7 +443,51 @@ const formatJson = (v: any): string => {
 const pendingCount = (items?: Task[]) =>
   (items ?? []).filter(t => t.status === 'pending').length;
 
-onMounted(fetchRoots);
+/** Whether any root task is still active (running or pending). */
+const hasActiveTasks = computed(() =>
+  rootTasks.value.some(t => t.status === 'running' || t.status === 'pending'),
+);
+
+/** Silent background refresh: root list + all expanded subtask panels. */
+const pollRefresh = async () => {
+  if (!hasActiveTasks.value) {
+    stopPolling();
+    return;
+  }
+  await fetchRoots({ preserveExpanded: true, silent: true });
+  // Also refresh any expanded subtask panels
+  for (const rootId of expandedRoots.value) {
+    if (subtaskMap[rootId]?.loaded) {
+      await fetchSubtasks(rootId, true);
+    }
+  }
+};
+
+const startPolling = () => {
+  if (pollTimer) return;
+  pollTimer = setInterval(pollRefresh, POLL_INTERVAL);
+};
+
+const stopPolling = () => {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+};
+
+/** Re-evaluate polling whenever root tasks change. */
+watch(hasActiveTasks, (active) => {
+  if (active) startPolling();
+  else stopPolling();
+});
+
+onMounted(() => {
+  fetchRoots();
+});
+
+onUnmounted(() => {
+  stopPolling();
+});
 </script>
 
 <template>
@@ -498,10 +552,13 @@ onMounted(fetchRoots);
           v-for="root in sortedRoots"
           :key="root.id"
           :value="root.id"
-          class="mb-2"
         >
-          <v-expansion-panel-title class="py-3 px-4">
+          <v-expansion-panel-title class="py-3 px-4" hide-actions>
             <div class="d-flex align-center w-100" style="min-width: 0">
+              <v-icon
+                class="mr-3 text-medium-emphasis"
+                :icon="expandedRoots.has(root.id) ? mdiChevronDown : mdiChevronRight"
+              />
               <v-chip
                 :color="statusColor[root.status] ?? 'grey'"
                 size="small"
@@ -523,12 +580,6 @@ onMounted(fetchRoots);
 
             <!-- Basic info — 2-column grid -->
             <div class="root-info-grid mb-4">
-              <div class="info-item">
-                <span class="text-caption text-medium-emphasis font-weight-medium text-uppercase">状态</span>
-                <v-chip :color="statusColor[root.status] ?? 'grey'" size="x-small" label>
-                  {{ statusLabel[root.status] ?? root.status }}
-                </v-chip>
-              </div>
               <div class="info-item">
                 <span class="text-caption text-medium-emphasis font-weight-medium text-uppercase">类型</span>
                 <span>{{ jobLabel[root.jobType] ?? root.jobType }}</span>
@@ -552,15 +603,40 @@ onMounted(fetchRoots);
             </div>
 
             <!-- Payload / last_result -->
-            <v-expansion-panels v-if="root.payload || root.lastResult" variant="popout" class="mb-4">
-              <v-expansion-panel v-if="root.payload" title="参数">
-                <v-expansion-panel-text>
-                  <pre class="json-block">{{ formatJson(root.payload) }}</pre>
+            <v-expansion-panels v-if="root.payload || root.lastResult" variant="accordion" class="subtask-panels mb-4">
+              <v-expansion-panel v-if="root.payload">
+                <v-expansion-panel-title class="py-2 px-3" hide-actions>
+                  <template #default="{ expanded }">
+                    <div class="d-flex align-center w-100" style="min-width: 0;">
+                      <v-icon
+                        class="mr-2 text-medium-emphasis"
+                        :icon="expanded ? mdiChevronDown : mdiChevronRight"
+                        size="small"
+                      />
+                      <span class="text-body-2">参数</span>
+                    </div>
+                  </template>
+                </v-expansion-panel-title>
+                <v-expansion-panel-text class="pt-0">
+                  <pre class="json-block" style="max-height: 120px; font-size: 0.75rem;">{{ formatJson(root.payload) }}</pre>
                 </v-expansion-panel-text>
               </v-expansion-panel>
-              <v-expansion-panel v-if="root.lastResult" title="执行结果">
-                <v-expansion-panel-text>
-                  <pre class="json-block">{{ formatJson(root.lastResult) }}</pre>
+
+              <v-expansion-panel v-if="root.lastResult">
+                <v-expansion-panel-title class="py-2 px-3" hide-actions>
+                  <template #default="{ expanded }">
+                    <div class="d-flex align-center w-100" style="min-width: 0;">
+                      <v-icon
+                        class="mr-2 text-medium-emphasis"
+                        :icon="expanded ? mdiChevronDown : mdiChevronRight"
+                        size="small"
+                      />
+                      <span class="text-body-2">执行结果</span>
+                    </div>
+                  </template>
+                </v-expansion-panel-title>
+                <v-expansion-panel-text class="pt-0">
+                  <pre class="json-block" style="max-height: 120px; font-size: 0.75rem;">{{ formatJson(root.lastResult) }}</pre>
                 </v-expansion-panel-text>
               </v-expansion-panel>
             </v-expansion-panels>
@@ -577,61 +653,68 @@ onMounted(fetchRoots);
               </v-btn>
             </div>
 
-            <v-divider class="mb-4" />
+            <v-divider v-if="(subtaskMap[root.id]?.total ?? 0) > 0" class="mb-4" />
 
-            <div class="d-flex align-center mb-3 ga-3 flex-wrap">
-              <span class="text-subtitle-2 font-weight-bold">子任务</span>
-              <span
-                v-if="subtaskMap[root.id]"
-                class="text-caption text-medium-emphasis"
-              >
-                共 {{ subtaskMap[root.id].total }} 条
-                <template v-if="pendingCount(subtaskMap[root.id].items) > 0">
-                  · {{ pendingCount(subtaskMap[root.id].items) }} 条待处理
-                </template>
-              </span>
-              <v-spacer />
-              <v-select
-                v-if="subtaskMap[root.id]"
-                v-model="subtaskMap[root.id].filterType"
-                :items="typeItems"
-                label="类型筛选"
-                clearable
-                density="compact"
-                hide-details
-                style="max-width: 160px;"
-                @update:model-value="applySubtaskFilter(root.id)"
-              />
-              <v-btn
-                v-if="subtaskMap[root.id] && pendingCount(subtaskMap[root.id].items) > 0"
-                size="small"
-                color="warning"
-                variant="flat"
-                @click="openInterruptSubtasks(root.id)"
-              >
-                <v-icon size="16" class="mr-1" :icon="mdiCancel" />
-                取消所有待处理子任务
-              </v-btn>
-            </div>
+            <template v-if="(subtaskMap[root.id]?.total ?? 0) > 0">
+              <div class="d-flex align-center mb-3 ga-3 flex-wrap">
+                <span class="text-subtitle-2 font-weight-bold">子任务</span>
+                <span
+                  v-if="subtaskMap[root.id]"
+                  class="text-caption text-medium-emphasis"
+                >
+                  共 {{ subtaskMap[root.id].total }} 条
+                  <template v-if="pendingCount(subtaskMap[root.id].items) > 0">
+                    · {{ pendingCount(subtaskMap[root.id].items) }} 条待处理
+                  </template>
+                </span>
+                <v-spacer />
+                <v-select
+                  v-if="subtaskMap[root.id]"
+                  v-model="subtaskMap[root.id].filterType"
+                  :items="typeItems"
+                  label="类型筛选"
+                  clearable
+                  density="compact"
+                  hide-details
+                  style="max-width: 160px;"
+                  @update:model-value="applySubtaskFilter(root.id)"
+                />
+                <v-btn
+                  v-if="subtaskMap[root.id] && pendingCount(subtaskMap[root.id].items) > 0"
+                  size="small"
+                  color="warning"
+                  variant="flat"
+                  @click="openInterruptSubtasks(root.id)"
+                >
+                  <v-icon size="16" class="mr-1" :icon="mdiCancel" />
+                  取消所有待处理子任务
+                </v-btn>
+              </div>
 
-            <div v-if="subtaskMap[root.id]?.loading" class="py-2">
-              <v-skeleton-loader v-for="j in 3" :key="j" type="list-item-two-line" class="mb-1" />
-            </div>
+              <div v-if="subtaskMap[root.id]?.loading" class="py-2">
+                <v-skeleton-loader v-for="j in 3" :key="j" type="list-item-two-line" class="mb-1" />
+              </div>
 
-            <v-expansion-panels
-              v-else-if="(subtaskMap[root.id]?.items ?? []).length > 0"
-              variant="accordion"
-              class="subtask-panels"
-            >
-              <v-expansion-panel
-                v-for="child in subtaskMap[root.id].items"
-                :key="child.id"
-                density="compact"
+              <v-expansion-panels
+                v-else-if="(subtaskMap[root.id]?.items ?? []).length > 0"
+                variant="accordion"
+                class="subtask-panels"
               >
-                <v-expansion-panel-title class="py-2 px-3">
-                  <div class="d-flex align-center" style="width: 100%; min-width: 0;">
-                    <v-chip
-                      :color="statusColor[child.status] ?? 'grey'"
+                <v-expansion-panel
+                  v-for="child in subtaskMap[root.id].items"
+                  :key="child.id"
+                  density="compact"
+                >
+                <v-expansion-panel-title class="py-2 px-3" hide-actions>
+                  <template #default="{ expanded }">
+                    <div class="d-flex align-center" style="width: 100%; min-width: 0;">
+                      <v-icon
+                        class="mr-2 text-medium-emphasis"
+                        :icon="expanded ? mdiChevronDown : mdiChevronRight"
+                        size="small"
+                      />
+                      <v-chip
+                        :color="statusColor[child.status] ?? 'grey'"
                       size="x-small"
                       label
                       class="flex-shrink-0 mr-2"
@@ -645,47 +728,38 @@ onMounted(fetchRoots);
                       {{ formatDate(child.runAt) }}
                     </span>
                   </div>
+                  </template>
                 </v-expansion-panel-title>
 
-                <v-expansion-panel-text>
-                  <v-list density="compact" class="py-0">
-                    <v-list-item>
-                      <v-list-item-title class="text-caption text-medium-emphasis font-weight-medium">状态</v-list-item-title>
-                      <v-list-item-subtitle>
-                        <v-chip :color="statusColor[child.status] ?? 'grey'" size="x-small" label>
-                          {{ statusLabel[child.status] ?? child.status }}
-                        </v-chip>
-                      </v-list-item-subtitle>
-                    </v-list-item>
-                    <v-list-item>
-                      <v-list-item-title class="text-caption text-medium-emphasis font-weight-medium">类型</v-list-item-title>
-                      <v-list-item-subtitle>{{ jobLabel[child.jobType] ?? child.jobType }}</v-list-item-subtitle>
-                    </v-list-item>
-                    <v-list-item>
-                      <v-list-item-title class="text-caption text-medium-emphasis font-weight-medium">重试次数</v-list-item-title>
-                      <v-list-item-subtitle>{{ child.attempts }} / {{ child.maxAttempts }}</v-list-item-subtitle>
-                    </v-list-item>
-                    <v-list-item>
-                      <v-list-item-title class="text-caption text-medium-emphasis font-weight-medium">创建时间</v-list-item-title>
-                      <v-list-item-subtitle>{{ formatDate(child.runAt) }}</v-list-item-subtitle>
-                    </v-list-item>
-                    <v-list-item v-if="child.doneAt">
-                      <v-list-item-title class="text-caption text-medium-emphasis font-weight-medium">完成时间</v-list-item-title>
-                      <v-list-item-subtitle>{{ formatDate(child.doneAt) }}</v-list-item-subtitle>
-                    </v-list-item>
-                    <v-list-item v-if="child.payload">
-                      <v-list-item-title class="text-caption text-medium-emphasis font-weight-medium">参数</v-list-item-title>
-                      <v-list-item-subtitle>
-                        <pre class="json-block" style="max-height: 120px;">{{ formatJson(child.payload) }}</pre>
-                      </v-list-item-subtitle>
-                    </v-list-item>
-                    <v-list-item v-if="child.lastResult">
-                      <v-list-item-title class="text-caption text-medium-emphasis font-weight-medium">结果</v-list-item-title>
-                      <v-list-item-subtitle>
-                        <pre class="json-block" style="max-height: 120px;">{{ formatJson(child.lastResult) }}</pre>
-                      </v-list-item-subtitle>
-                    </v-list-item>
-                  </v-list>
+                <v-expansion-panel-text class="pt-0">
+                  <div class="root-info-grid mb-2 mt-2">
+                    <div class="info-item">
+                      <span class="text-caption text-medium-emphasis font-weight-medium">类型</span>
+                      <span class="text-body-2">{{ jobLabel[child.jobType] ?? child.jobType }}</span>
+                    </div>
+                    <div class="info-item">
+                      <span class="text-caption text-medium-emphasis font-weight-medium">重试次数</span>
+                      <span class="text-body-2">{{ child.attempts }} / {{ child.maxAttempts }}</span>
+                    </div>
+                    <div class="info-item">
+                      <span class="text-caption text-medium-emphasis font-weight-medium">创建时间</span>
+                      <span class="text-body-2">{{ formatDate(child.runAt) }}</span>
+                    </div>
+                    <div class="info-item" v-if="child.doneAt">
+                      <span class="text-caption text-medium-emphasis font-weight-medium">完成时间</span>
+                      <span class="text-body-2">{{ formatDate(child.doneAt) }}</span>
+                    </div>
+                  </div>
+
+                  <div v-if="child.payload" class="mb-2">
+                    <span class="text-caption text-medium-emphasis font-weight-medium d-block mb-1">参数</span>
+                    <pre class="json-block" style="max-height: 120px; font-size: 0.75rem;">{{ formatJson(child.payload) }}</pre>
+                  </div>
+
+                  <div v-if="child.lastResult" class="mb-2">
+                    <span class="text-caption text-medium-emphasis font-weight-medium d-block mb-1">结果</span>
+                    <pre class="json-block" style="max-height: 120px; font-size: 0.75rem;">{{ formatJson(child.lastResult) }}</pre>
+                  </div>
 
                   <v-divider class="my-2" />
                   <div class="d-flex justify-end ga-2">
@@ -712,6 +786,7 @@ onMounted(fetchRoots);
             >
               暂无子任务
             </v-alert>
+            </template>
           </v-expansion-panel-text>
         </v-expansion-panel>
       </v-expansion-panels>
@@ -737,32 +812,25 @@ onMounted(fetchRoots);
       <v-card>
         <v-card-title>创建爬取任务</v-card-title>
         <v-card-text>
-          <v-form ref="createFormRef" @submit.prevent="submitCreate">
-            <v-text-field v-model.number="createForm.crawler_id" label="Crawler ID" type="number" :rules="requiredRule" />
-            <v-select v-model="createForm.crawl_type" :items="crawlTypeItems" item-title="title" item-value="value" label="爬取类型" :rules="requiredRule" />
+          <v-form ref="createFormRef" class="d-flex flex-column ga-2" @submit.prevent="submitCreate">
+            <v-text-field v-model.number="createForm.crawler_id" label="Crawler ID" type="number" :rules="requiredRule" hide-details="auto" />
+            <v-select v-model="createForm.crawl_type" :items="crawlTypeItems" item-title="title" item-value="value" label="爬取类型" :rules="requiredRule" hide-details="auto" />
             <v-text-field
               v-if="createForm.crawl_type === 1"
               v-model="createForm.target_user_id"
               label="目标用户 ID"
               :rules="requiredRule"
-            />
-            <v-date-input
-              v-if="createForm.crawl_type === 0"
-              v-model="createForm.target_start_date"
-              label="开始日期"
-              :rules="requiredRule"
-              density="comfortable"
               hide-details="auto"
             />
             <v-date-input
               v-if="createForm.crawl_type === 0"
-              v-model="createForm.target_end_date"
-              label="结束日期"
+              v-model="createForm.target_date_range"
+              label="日期范围"
+              multiple="range"
               :rules="requiredRule"
-              density="comfortable"
               hide-details="auto"
             />
-            <v-text-field v-model="createForm.target_search_prompt" label="搜索关键词（可选）" />
+            <v-text-field v-model="createForm.target_search_prompt" label="搜索关键词（可选）" hide-details="auto" />
           </v-form>
         </v-card-text>
         <v-card-actions>
