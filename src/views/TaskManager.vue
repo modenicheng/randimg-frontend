@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import Axios from '../axios/axios';
 import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
-import { mdiPlus, mdiCancel, mdiStopCircleOutline, mdiBroom, mdiChevronRight, mdiChevronDown } from '@mdi/js';
+import { mdiPlus, mdiCancel, mdiStopCircleOutline, mdiBroom, mdiChevronRight, mdiChevronDown, mdiFormatListChecks, mdiCheckboxBlankOutline } from '@mdi/js';
 
 /** Core task data returned by both /tasks/roots and /tasks/{id}/subtasks. */
 interface Task {
@@ -121,7 +121,6 @@ const cleanType    = ref<string | null>(null);
 
 const cleanFlagItems = [
   { title: '已完成', value: 'completed' },
-  { title: '部分成功', value: 'partial_success' },
   { title: '失败', value: 'failed' },
   { title: '已取消', value: 'killed' },
   { title: '待处理', value: 'pending' },
@@ -777,21 +776,26 @@ onUnmounted(() => {
               </v-expansion-panel>
             </v-expansion-panels>
 
-            <v-alert
+            <v-empty-state
               v-else-if="subtaskMap[root.id]?.loaded"
-              type="info"
-              variant="tonal"
-              density="compact"
-              class="mt-2"
-            >
-              暂无子任务
-            </v-alert>
+              :icon="mdiCheckboxBlankOutline"
+              title="暂无子任务"
+              text="该任务下还没有产生子任务。"
+              size="64"
+              min-height="180"
+              class="my-2"
+            />
             </template>
           </v-expansion-panel-text>
         </v-expansion-panel>
       </v-expansion-panels>
 
-      <v-alert v-else type="info" variant="tonal" class="mt-2">暂无任务</v-alert>
+      <v-empty-state
+        v-else
+        :icon="mdiFormatListChecks"
+        title="暂无任务"
+        text="任务队列为空，可以通过上方按钮新建一个任务。"
+      />
     </div>
 
     <div v-if="totalPages > 1" class="d-flex flex-column align-center mt-4">
