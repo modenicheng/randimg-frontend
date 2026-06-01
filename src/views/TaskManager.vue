@@ -24,6 +24,8 @@ interface SubtaskState {
   loading: boolean;
   loaded: boolean;         // true after first load → only re-fetch on explicit action
   filterType: string | null;
+  page: number;
+  pageSize: number;
 }
 
 const statusColor: Record<string, string> = {
@@ -206,7 +208,10 @@ const fetchSubtasks = async (rootId: string, silent = false) => {
   if (!state) return;
   if (!silent) state.loading = true;
   try {
-    const params: Record<string, any> = {};
+    const params: Record<string, any> = {
+      limit:  state.pageSize,
+      offset: (state.page - 1) * state.pageSize,
+    };
     if (state.filterType) params.task_type = state.filterType;
 
     const res = await Axios.get(`/tasks/${rootId}/subtasks`, { params });
@@ -242,6 +247,8 @@ const onRootExpandChange = (openIds: unknown) => {
         loading: false,
         loaded: false,
         filterType: null,
+        page: 1,
+        pageSize: 10,
       };
       // Fire and forget (don't await so expansion happens instantly)
       nextTick(() => fetchSubtasks(id));
@@ -259,6 +266,17 @@ const refreshSubtask = async (rootId: string) => {
 };
 
 const applySubtaskFilter = (rootId: string) => {
+  subtaskMap[rootId].page = 1;
+  fetchSubtasks(rootId);
+};
+
+const subtaskTotalPages = (rootId: string) => {
+  const state = subtaskMap[rootId];
+  if (!state) return 1;
+  return Math.max(1, Math.ceil(state.total / state.pageSize));
+};
+
+const onSubtaskPageChange = (rootId: string) => {
   fetchSubtasks(rootId);
 };
 
@@ -678,6 +696,15 @@ onUnmounted(() => {
                   style="max-width: 160px;"
                   @update:model-value="applySubtaskFilter(root.id)"
                 />
+                <v-pagination
+                  v-if="subtaskMap[root.id] && subtaskTotalPages(root.id) > 1"
+                  v-model="subtaskMap[root.id].page"
+                  :length="subtaskTotalPages(root.id)"
+                  :total-visible="3"
+                  density="compact"
+                  rounded="circle"
+                  @update:model-value="onSubtaskPageChange(root.id)"
+                />
                 <v-btn
                   v-if="subtaskMap[root.id] && pendingCount(subtaskMap[root.id].items) > 0"
                   size="small"
@@ -694,8 +721,8 @@ onUnmounted(() => {
                 <v-skeleton-loader v-for="j in 3" :key="j" type="list-item-two-line" class="mb-1" />
               </div>
 
+              <template v-else-if="(subtaskMap[root.id]?.items ?? []).length > 0">
               <v-expansion-panels
-                v-else-if="(subtaskMap[root.id]?.items ?? []).length > 0"
                 variant="accordion"
                 class="subtask-panels"
               >
@@ -775,6 +802,18 @@ onUnmounted(() => {
                 </v-expansion-panel-text>
               </v-expansion-panel>
             </v-expansion-panels>
+
+            <div v-if="subtaskTotalPages(root.id) > 1" class="d-flex justify-center mt-3">
+              <v-pagination
+                v-model="subtaskMap[root.id].page"
+                :length="subtaskTotalPages(root.id)"
+                :total-visible="5"
+                density="comfortable"
+                rounded="circle"
+                @update:model-value="onSubtaskPageChange(root.id)"
+              />
+            </div>
+            </template>
 
             <v-empty-state
               v-else-if="subtaskMap[root.id]?.loaded"
