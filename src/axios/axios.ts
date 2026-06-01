@@ -26,7 +26,7 @@ Axios.interceptors.response.use(
         return response
     },
     error => {
-        return error.response
+        return Promise.reject(error)
     }
 )
 export default Axios
