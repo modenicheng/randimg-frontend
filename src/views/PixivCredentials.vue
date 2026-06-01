@@ -48,6 +48,13 @@ const tokenData = ref<CredentialToken | null>(null);
 // 刷新状态
 const refreshingId = ref<number | null>(null);
 
+// Snackbar
+const snackbar = ref({ show: false, text: '', color: 'success' });
+
+// 删除确认弹窗
+const deleteDialog = ref(false);
+const deleteId = ref<number | null>(null);
+
 const statusLabels: Record<number, string> = {
   0: '正常',
   1: '已过期',
@@ -102,9 +109,16 @@ const submitForm = async () => {
   await fetchCredentials();
 };
 
-const deleteCredential = async (id: number) => {
-  if (!confirm('确认删除此凭证？')) return;
-  await Axios.delete(`/pixiv-credential/${id}`);
+const openDelete = (id: number) => {
+  deleteId.value = id;
+  deleteDialog.value = true;
+};
+
+const confirmDelete = async () => {
+  if (deleteId.value === null) return;
+  await Axios.delete(`/pixiv-credential/${deleteId.value}`);
+  deleteDialog.value = false;
+  deleteId.value = null;
   await fetchCredentials();
 };
 
@@ -113,7 +127,7 @@ const refreshToken = async (id: number) => {
   try {
     const res = await Axios.post(`/pixiv-credential/${id}/refresh`);
     if (res.status === 200) {
-      alert('刷新任务已提交');
+      snackbar.value = { show: true, text: '刷新任务已提交', color: 'success' };
     }
   } finally {
     refreshingId.value = null;
@@ -176,7 +190,7 @@ onMounted(fetchCredentials);
         <v-btn size="small" variant="text" color="info" @click="viewToken(item.id)">查看Token</v-btn>
         <v-btn size="small" variant="text" color="warning" :loading="refreshingId === item.id"
           @click="refreshToken(item.id)">刷新</v-btn>
-        <v-btn size="small" variant="text" color="error" @click="deleteCredential(item.id)">删除</v-btn>
+        <v-btn size="small" variant="text" color="error" @click="openDelete(item.id)">删除</v-btn>
       </template>
     </v-data-table>
 
@@ -233,5 +247,23 @@ onMounted(fetchCredentials);
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <!-- 删除确认弹窗 -->
+    <v-dialog v-model="deleteDialog" max-width="400">
+      <v-card>
+        <v-card-title>确认删除</v-card-title>
+        <v-card-text>确定要删除此凭证吗？此操作不可撤销。</v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn text="取消" @click="deleteDialog = false" />
+          <v-btn color="error" text="删除" @click="confirmDelete" />
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- Snackbar -->
+    <v-snackbar v-model="snackbar.show" :color="snackbar.color" timeout="3000" location="top">
+      {{ snackbar.text }}
+    </v-snackbar>
   </v-container>
 </template>

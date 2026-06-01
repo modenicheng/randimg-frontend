@@ -28,6 +28,10 @@ const createDialog = ref(false);
 const creating = ref(false);
 const cancelAllDialog = ref(false);
 const cancellingAll = ref(false);
+const cancelTaskDialog = ref(false);
+const cancelTaskId = ref<string | null>(null);
+const retryTaskDialog = ref(false);
+const retryTaskId = ref<string | null>(null);
 const createForm = ref({
   crawler_id: 1,
   crawl_type: 1,
@@ -155,25 +159,41 @@ const submitCreate = async () => {
   }
 };
 
-const cancelTask = async (id: string) => {
-  if (!confirm('确认取消此任务？')) return;
+const openCancelTask = (id: string) => {
+  cancelTaskId.value = id;
+  cancelTaskDialog.value = true;
+};
+
+const confirmCancelTask = async () => {
+  if (!cancelTaskId.value) return;
   try {
-    await Axios.delete(`/tasks/${id}`);
+    await Axios.delete(`/tasks/${cancelTaskId.value}`);
     snackbar.value = { show: true, text: '任务已取消', color: 'success' };
     await fetchTasks();
   } catch (e: any) {
     showError(e.response?.data?.message ?? '取消失败');
+  } finally {
+    cancelTaskDialog.value = false;
+    cancelTaskId.value = null;
   }
 };
 
-const retryTask = async (id: string) => {
-  if (!confirm('确认重试此任务？')) return;
+const openRetryTask = (id: string) => {
+  retryTaskId.value = id;
+  retryTaskDialog.value = true;
+};
+
+const confirmRetryTask = async () => {
+  if (!retryTaskId.value) return;
   try {
-    await Axios.post(`/tasks/${id}/retry`);
+    await Axios.post(`/tasks/${retryTaskId.value}/retry`);
     snackbar.value = { show: true, text: '任务已重试', color: 'success' };
     await fetchTasks();
   } catch (e: any) {
     showError(e.response?.data?.message ?? '重试失败');
+  } finally {
+    retryTaskDialog.value = false;
+    retryTaskId.value = null;
   }
 };
 
@@ -240,12 +260,12 @@ onMounted(fetchTasks);
     </v-row>
 
     <!-- Filters -->
-    <v-row dense class="mb-4">
+    <v-row dense class="mb-4" align="center">
       <v-col cols="12" sm="4">
-        <v-select v-model="filterType" :items="typeItems" label="任务类型" clearable density="comfortable" />
+        <v-select v-model="filterType" :items="typeItems" label="任务类型" clearable density="comfortable" hide-details />
       </v-col>
       <v-col cols="12" sm="4">
-        <v-select v-model="filterStatus" :items="statusItems" label="状态" clearable density="comfortable" />
+        <v-select v-model="filterStatus" :items="statusItems" label="状态" clearable density="comfortable" hide-details />
       </v-col>
       <v-col cols="12" sm="4" class="d-flex align-center">
         <v-btn color="primary" @click="applyFilter" :loading="loading" class="mr-2">筛选</v-btn>
@@ -259,22 +279,18 @@ onMounted(fetchTasks);
 
       <v-expansion-panels v-if="sortedTasks.length > 0" variant="accordion" multiple>
         <v-expansion-panel v-for="task in sortedTasks" :key="task.id">
-          <v-expansion-panel-title>
-            <v-row no-gutters align="center" style="width: 100%;">
-              <v-col cols="auto" class="mr-3">
-                <v-chip :color="statusColor[task.status] ?? 'grey'" size="small" label>
-                  {{ statusLabel[task.status] ?? task.status }}
-                </v-chip>
-              </v-col>
-              <v-col class="font-weight-medium text-truncate">
+          <v-expansion-panel-title class="pa-3">
+            <div class="d-flex align-center" style="width: 100%; min-width: 0;">
+              <v-chip :color="statusColor[task.status] ?? 'grey'" size="small" label class="flex-shrink-0 mr-3">
+                {{ statusLabel[task.status] ?? task.status }}
+              </v-chip>
+              <span class="font-weight-medium text-truncate flex-grow-1" style="min-width: 0;">
                 {{ taskTitle(task) }}
-              </v-col>
-              <v-col cols="auto" class="ml-2">
-                <span class="text-caption text-medium-emphasis">
-                  {{ formatDate(task.run_at) }}
-                </span>
-              </v-col>
-            </v-row>
+              </span>
+              <span class="text-caption text-medium-emphasis ml-3 flex-shrink-0">
+                {{ formatDate(task.run_at) }}
+              </span>
+            </div>
           </v-expansion-panel-title>
 
           <v-expansion-panel-text>
@@ -322,9 +338,9 @@ onMounted(fetchTasks);
             <v-divider class="my-2" />
             <div class="d-flex justify-end ga-2">
               <v-btn v-if="task.status === 'pending'" size="small" color="error" variant="outlined"
-                @click="cancelTask(task.id)">取消</v-btn>
+                @click="openCancelTask(task.id)">取消</v-btn>
               <v-btn v-if="task.status === 'failed' || task.status === 'killed'" size="small" color="warning"
-                variant="outlined" @click="retryTask(task.id)">重试</v-btn>
+                variant="outlined" @click="openRetryTask(task.id)">重试</v-btn>
             </div>
           </v-expansion-panel-text>
         </v-expansion-panel>
@@ -376,6 +392,32 @@ onMounted(fetchTasks);
           <v-spacer />
           <v-btn text="返回" @click="cancelAllDialog = false" />
           <v-btn color="error" text="确认取消" :loading="cancellingAll" @click="cancelAllTasks" />
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- Cancel Task Confirmation Dialog -->
+    <v-dialog v-model="cancelTaskDialog" max-width="400">
+      <v-card>
+        <v-card-title>确认取消任务</v-card-title>
+        <v-card-text>确定要取消此任务吗？</v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn text="返回" @click="cancelTaskDialog = false" />
+          <v-btn color="error" text="确认取消" @click="confirmCancelTask" />
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- Retry Task Confirmation Dialog -->
+    <v-dialog v-model="retryTaskDialog" max-width="400">
+      <v-card>
+        <v-card-title>确认重试任务</v-card-title>
+        <v-card-text>确定要重试此任务吗？</v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn text="返回" @click="retryTaskDialog = false" />
+          <v-btn color="warning" text="确认重试" @click="confirmRetryTask" />
         </v-card-actions>
       </v-card>
     </v-dialog>
