@@ -34,6 +34,21 @@ Navigation items are dynamically built from the route definitions: routes with `
 - **`src/store/store.ts`** — Single `useUserStore` Pinia store holding `username`, `token`, and `theme`. Persisted to localStorage.
 - **`src/router/router.ts`** — Exports both the router instance and the raw `routes` array (used by `Home.vue` to build the nav list).
 
+### Task Status Semantics (TaskManager)
+
+The backend uses string status values that don't map 1:1 to their display labels:
+
+| API Status | Display Label | Color | Meaning |
+|---|---|---|---|
+| `pending` | 待处理 | blue | Waiting to be picked up |
+| `running` | 运行中 | orange | Currently executing |
+| `completed` | 已完成 | green | Finished successfully |
+| `failed` | 重试中 | orange | Transient failure, will be retried up to `maxAttempts` |
+| `killed` | 失败 | red | Retries exhausted or manually cancelled — final state |
+| `partial_success` | 部分成功 | amber | Some subtasks succeeded, some failed |
+
+Key: `failed` is **not** final — it means the task failed but has remaining retry attempts. `killed` is the true terminal failure state.
+
 ### Component Conventions
 
 - Views go in `src/views/`, shared components in `src/components/`

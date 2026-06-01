@@ -32,8 +32,8 @@ const statusColor: Record<string, string> = {
   pending:          'blue',
   running:          'orange',
   completed:        'green',
-  failed:           'red',
-  killed:           'grey',
+  failed:           'orange',
+  killed:           'red',
   partial_success:  'amber',
 };
 
@@ -41,8 +41,8 @@ const statusLabel: Record<string, string> = {
   pending:          '待处理',
   running:          '运行中',
   completed:        '已完成',
-  failed:           '失败',
-  killed:           '已取消',
+  failed:           '重试中',
+  killed:           '失败',
   partial_success:  '部分成功',
 };
 
@@ -64,13 +64,23 @@ const typeItems = [
   { title: '凭证更新', value: 'refresh-pixiv-token' },
 ];
 
+/** Type filter items for subtask panels — subtasks are download/upload/etc, not crawl roots. */
+const subtaskTypeItems = [
+  { title: '全部', value: null },
+  { title: '下载', value: 'download' },
+  { title: '颜色提取', value: 'color-extract' },
+  { title: '上传', value: 'upload' },
+  { title: '合规检查', value: 'accessibility-check' },
+  { title: '发现', value: 'discover' },
+];
+
 const statusItems = [
   { title: '全部', value: null },
   { title: '待处理', value: 'pending' },
   { title: '运行中', value: 'running' },
   { title: '已完成', value: 'completed' },
-  { title: '失败', value: 'failed' },
-  { title: '已取消', value: 'killed' },
+  { title: '重试中', value: 'failed' },
+  { title: '失败', value: 'killed' },
   { title: '部分成功', value: 'partial_success' },
 ];
 
@@ -80,7 +90,29 @@ const crawlTypeItems = [
   { title: '收藏爬取', value: 2 },
 ];
 
-/** Sort priority: running → pending → failed/killed → completed */
+const rankingModeItems = [
+  { title: '日榜', value: 'day' },
+  { title: '周榜', value: 'week' },
+  { title: '月榜', value: 'month' },
+  { title: '原创榜', value: 'original' },
+  { title: '新人榜', value: 'rookie' },
+  { title: 'R18 日榜', value: 'daily_r18' },
+  { title: 'R18 周榜', value: 'weekly_r18' },
+];
+
+const illustTypeItems = [
+  { title: '插画', value: 'illust' },
+  { title: '漫画', value: 'manga' },
+];
+
+const seedMethodItems = [
+  { title: '流行度', value: 'popularity' },
+  { title: '浏览量', value: 'views' },
+  { title: '收藏量', value: 'bookmarks' },
+  { title: '随机', value: 'random' },
+];
+
+/** Sort priority: running → pending → retrying/failed → completed */
 const statusOrder: Record<string, number> = {
   running: 0, pending: 1, partial_success: 2, failed: 3, killed: 4, completed: 5,
 };
@@ -121,8 +153,8 @@ const cleanType    = ref<string | null>(null);
 
 const cleanFlagItems = [
   { title: '已完成', value: 'completed' },
-  { title: '失败', value: 'failed' },
-  { title: '已取消', value: 'killed' },
+  { title: '重试中', value: 'failed' },
+  { title: '失败', value: 'killed' },
   { title: '待处理', value: 'pending' },
   { title: '运行中', value: 'running' },
 ];
@@ -133,11 +165,16 @@ let pollTimer: ReturnType<typeof setInterval> | null = null;
 const POLL_INTERVAL = 5000; // 5 seconds
 
 const createForm = ref({
-  crawler_id:          1,
   crawl_type:           1,
   target_user_id:      '',
   target_date_range:   [] as Date[],
   target_search_prompt: '',
+  ranking_mode:       'day',
+  illust_type:        'illust',
+  max_pages:           0,
+  discover_hops:       0,
+  discover_seed_limit: 0,
+  discover_seed_method: 'popularity',
 });
 
 const snackbar = ref({ show: false, text: '', color: 'error' });
@@ -428,7 +465,6 @@ const submitCreate = async () => {
   creating.value = true;
   try {
     const body: any = {
-      crawler_id:  createForm.value.crawler_id,
       crawl_type:  createForm.value.crawl_type,
     };
     if (createForm.value.target_user_id)       body.target_user_id       = createForm.value.target_user_id;
@@ -439,6 +475,22 @@ const submitCreate = async () => {
       body.target_end_date   = fmtDate(range[1]) + 'T00:00:00';
     }
     if (createForm.value.target_search_prompt) body.target_search_prompt = createForm.value.target_search_prompt;
+    // 排名模式（排行爬取）
+    if (createForm.value.crawl_type === 0 && createForm.value.ranking_mode) {
+      body.ranking_mode = createForm.value.ranking_mode;
+    }
+    // 作品类型（用户爬取）
+    if (createForm.value.crawl_type === 1 && createForm.value.illust_type) {
+      body.illust_type = createForm.value.illust_type;
+    }
+    // 页数限制
+    if (createForm.value.max_pages > 0) body.max_pages = createForm.value.max_pages;
+    // Discover 参数
+    if (createForm.value.discover_hops > 0) body.discover_hops = createForm.value.discover_hops;
+    if (createForm.value.discover_seed_limit > 0) body.discover_seed_limit = createForm.value.discover_seed_limit;
+    if (createForm.value.discover_seed_method && createForm.value.discover_seed_method !== 'popularity') {
+      body.discover_seed_method = createForm.value.discover_seed_method;
+    }
 
     await Axios.post('/crawler', body);
     createDialog.value = false;
@@ -456,8 +508,13 @@ const showError = (text: string) => {
   snackbar.value = { show: true, text, color: 'error' };
 };
 
+const JOB_TYPE_PREFIX = 'randimg_backend_rs::task_queue::jobs::';
+
+const stripJobTypePrefix = (jobType: string): string =>
+  jobType.startsWith(JOB_TYPE_PREFIX) ? jobType.slice(JOB_TYPE_PREFIX.length) : jobType;
+
 const taskTitle = (t: Task): string => {
-  const label = jobLabel[t.jobType] ?? t.jobType;
+  const label = jobLabel[t.jobType] ?? stripJobTypePrefix(t.jobType);
   let hint = '';
   if (t.payload?.target_user_id)                     hint = `user: ${t.payload.target_user_id}`;
   else if (t.payload?.target_start_date)             hint = `${t.payload.target_start_date} ~ ${t.payload.target_end_date ?? ''}`;
@@ -710,7 +767,7 @@ onUnmounted(() => {
                 <v-select
                   v-if="subtaskMap[root.id]"
                   v-model="subtaskMap[root.id].filterType"
-                  :items="typeItems"
+                  :items="subtaskTypeItems"
                   label="类型筛选"
                   clearable
                   density="compact"
@@ -878,7 +935,6 @@ onUnmounted(() => {
         <v-card-title>创建爬取任务</v-card-title>
         <v-card-text>
           <v-form ref="createFormRef" class="d-flex flex-column ga-2" @submit.prevent="submitCreate">
-            <v-text-field v-model.number="createForm.crawler_id" label="Crawler ID" type="number" :rules="requiredRule" hide-details="auto" />
             <v-select v-model="createForm.crawl_type" :items="crawlTypeItems" item-title="title" item-value="value" label="爬取类型" :rules="requiredRule" hide-details="auto" />
             <v-text-field
               v-if="createForm.crawl_type === 1"
@@ -896,6 +952,16 @@ onUnmounted(() => {
               hide-details="auto"
             />
             <v-text-field v-model="createForm.target_search_prompt" label="搜索关键词（可选）" hide-details="auto" />
+
+            <v-select v-if="createForm.crawl_type === 0" v-model="createForm.ranking_mode" :items="rankingModeItems" item-title="title" item-value="value" label="排行榜类型" hide-details="auto" />
+            <v-select v-if="createForm.crawl_type === 1" v-model="createForm.illust_type" :items="illustTypeItems" item-title="title" item-value="value" label="作品类型" hide-details="auto" />
+            <v-text-field v-model.number="createForm.max_pages" label="最大页数（0=不限）" type="number" min="0" hide-details="auto" />
+
+            <v-divider class="my-1" />
+            <span class="text-caption text-medium-emphasis">Discover 参数</span>
+            <v-text-field v-model.number="createForm.discover_hops" label="Discover 跳数（0=使用默认值）" type="number" min="0" hide-details="auto" />
+            <v-text-field v-model.number="createForm.discover_seed_limit" label="Discover 种子数（0=使用默认值）" type="number" min="0" hide-details="auto" />
+            <v-select v-model="createForm.discover_seed_method" :items="seedMethodItems" item-title="title" item-value="value" label="Discover 种子选择策略" hide-details="auto" />
           </v-form>
         </v-card-text>
         <v-card-actions>
