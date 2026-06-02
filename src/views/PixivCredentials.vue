@@ -69,6 +69,8 @@ const fetchCredentials = async () => {
   try {
     const res = await Axios.get('/pixiv-credential');
     if (res.status === 200) credentials.value = res.data;
+  } catch {
+    snackbar.value = { show: true, text: '获取凭证列表失败', color: 'error' };
   } finally {
     loading.value = false;
   }
@@ -92,16 +94,20 @@ const openEdit = (cred: PixivCredential) => {
 };
 
 const submitForm = async () => {
-  if (editMode.value && editId.value !== null) {
-    const body: any = { status: editForm.value.status };
-    if (editForm.value.note) body.note = editForm.value.note;
-    if (editForm.value.refresh_token) body.refresh_token = editForm.value.refresh_token;
-    await Axios.patch(`/pixiv-credential/${editId.value}`, body);
-  } else {
-    await Axios.post('/pixiv-credential', form.value);
+  try {
+    if (editMode.value && editId.value !== null) {
+      const body: any = { status: editForm.value.status };
+      if (editForm.value.note) body.note = editForm.value.note;
+      if (editForm.value.refresh_token) body.refresh_token = editForm.value.refresh_token;
+      await Axios.patch(`/pixiv-credential/${editId.value}`, body);
+    } else {
+      await Axios.post('/pixiv-credential', form.value);
+    }
+    dialogOpen.value = false;
+    await fetchCredentials();
+  } catch {
+    snackbar.value = { show: true, text: '保存凭证失败', color: 'error' };
   }
-  dialogOpen.value = false;
-  await fetchCredentials();
 };
 
 const openDelete = (id: number) => {
@@ -111,10 +117,14 @@ const openDelete = (id: number) => {
 
 const confirmDelete = async () => {
   if (deleteId.value === null) return;
-  await Axios.delete(`/pixiv-credential/${deleteId.value}`);
-  deleteDialog.value = false;
-  deleteId.value = null;
-  await fetchCredentials();
+  try {
+    await Axios.delete(`/pixiv-credential/${deleteId.value}`);
+    deleteDialog.value = false;
+    deleteId.value = null;
+    await fetchCredentials();
+  } catch {
+    snackbar.value = { show: true, text: '删除凭证失败', color: 'error' };
+  }
 };
 
 const refreshToken = async (id: number) => {
@@ -124,6 +134,8 @@ const refreshToken = async (id: number) => {
     if (res.status === 200) {
       snackbar.value = { show: true, text: '刷新任务已提交', color: 'success' };
     }
+  } catch {
+    snackbar.value = { show: true, text: '刷新 Token 失败', color: 'error' };
   } finally {
     refreshingId.value = null;
   }
@@ -136,6 +148,8 @@ const viewToken = async (id: number) => {
   try {
     const res = await Axios.get(`/pixiv-credential/${id}/token`);
     if (res.status === 200) tokenData.value = res.data;
+  } catch {
+    snackbar.value = { show: true, text: '获取 Token 失败', color: 'error' };
   } finally {
     tokenLoading.value = false;
   }

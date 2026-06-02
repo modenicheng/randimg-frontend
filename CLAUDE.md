@@ -54,3 +54,7 @@ Key: `failed` is **not** final — it means the task failed but has remaining re
 - Views go in `src/views/`, shared components in `src/components/`
 - SFCs use `<script setup lang="ts">` style
 - Theme (light/dark) is toggled via Vuetify's `useTheme()` and persisted in the user store
+
+### `accessible` Field (ImageList)
+
+`accessible` is a **database-level boolean** on the `image` table. It controls **non-admin user visibility** — when `false`, non-admin users cannot see the image. **Admin users (authenticated) always see all images by default.** The `accessible` query param on `GET /list` only accepts `"true"` / `"false"` (not `"all"`). When omitted, no filter is applied (admin sees everything). See `randimg-backend-rs/docs/api.md` for full details.

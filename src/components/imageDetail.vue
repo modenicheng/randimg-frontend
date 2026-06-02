@@ -1,5 +1,13 @@
 <template>
-  <div class="container-cols" v-if="imageDetailData" :style="{
+  <div v-if="loading" class="d-flex align-center justify-center" style="height: 100%;">
+    <v-progress-circular color="blue-lighten-4" indeterminate size="64"></v-progress-circular>
+  </div>
+  <div v-else-if="error" class="d-flex flex-column align-center justify-center" style="height: 100%; gap: 1rem;">
+    <v-icon color="error" size="48">mdi-alert-circle-outline</v-icon>
+    <div class="text-body-1 text-error">{{ error }}</div>
+    <v-btn variant="outlined" @click="getImageDetail">Retry</v-btn>
+  </div>
+  <div class="container-cols" v-else-if="imageDetailData" :style="{
     gridTemplateColumns: imageDetailData.aspect_ratio >= 1.25 ? '1fr' : 'auto 1fr',
   }">
     <div class="img-container">
@@ -64,7 +72,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, watch } from 'vue';
 import Axios from '../axios/axios';
 
 const props = defineProps<{
@@ -74,24 +82,35 @@ const props = defineProps<{
 const imageDetailData = ref();
 const imgShowWidth = ref();
 const imgShowHeight = ref();
+const loading = ref(false);
+const error = ref('');
 
 const getImageDetail = async () => {
-  const res = await Axios.get(`/image/${props.imageId}`);
-  const d = res.data
-  // 转换 colors 格式：后端返回 [{rgb:[r,g,b], lab:[l,a,b]}, ...] → 前端需要 {colors: [[r,g,b], ...]}
-  if (Array.isArray(d.colors) && d.colors.length && d.colors[0]?.rgb) {
-    d.colors = { colors: d.colors.map((c: any) => c.rgb) }
-  }
-  imageDetailData.value = d;
-  if (imageDetailData.value.aspect_ratio < 0.7) {
-    imgShowHeight.value = 0.8 * window.innerHeight;
-    imgShowWidth.value = imgShowHeight.value * imageDetailData.value.aspect_ratio;
-  } else if (imageDetailData.value.aspect_ratio < 1.25) {
-    imgShowWidth.value = 0.3 * window.innerWidth;
-    imgShowHeight.value = imgShowWidth.value / imageDetailData.value.aspect_ratio;
-  } else {
-    imgShowWidth.value = 0.5 * window.innerWidth;
-    imgShowHeight.value = imgShowWidth.value / imageDetailData.value.aspect_ratio;
+  loading.value = true;
+  error.value = '';
+  imageDetailData.value = null;
+  try {
+    const res = await Axios.get(`/image/${props.imageId}`);
+    const d = res.data
+    // 转换 colors 格式：后端返回 [{rgb:[r,g,b], lab:[l,a,b]}, ...] → 前端需要 {colors: [[r,g,b], ...]}
+    if (Array.isArray(d.colors) && d.colors.length && d.colors[0]?.rgb) {
+      d.colors = { colors: d.colors.map((c: any) => c.rgb) }
+    }
+    imageDetailData.value = d;
+    if (imageDetailData.value.aspect_ratio < 0.7) {
+      imgShowHeight.value = 0.8 * window.innerHeight;
+      imgShowWidth.value = imgShowHeight.value * imageDetailData.value.aspect_ratio;
+    } else if (imageDetailData.value.aspect_ratio < 1.25) {
+      imgShowWidth.value = 0.3 * window.innerWidth;
+      imgShowHeight.value = imgShowWidth.value / imageDetailData.value.aspect_ratio;
+    } else {
+      imgShowWidth.value = 0.5 * window.innerWidth;
+      imgShowHeight.value = imgShowWidth.value / imageDetailData.value.aspect_ratio;
+    }
+  } catch (e: any) {
+    error.value = e?.message || 'Failed to load image detail';
+  } finally {
+    loading.value = false;
   }
 };
 
@@ -100,6 +119,10 @@ const toUrl = (url: string) => {
 };
 
 onMounted(() => {
+  getImageDetail();
+});
+
+watch(() => props.imageId, () => {
   getImageDetail();
 });
 </script>

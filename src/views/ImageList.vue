@@ -5,6 +5,11 @@ import { useUserStore } from "../store/store";
 import { mdiFilterOutline } from "@mdi/js";
 const store = useUserStore()
 
+const snackbar = ref({ show: false, text: '', color: 'error' })
+const showError = (text: string) => {
+  snackbar.value = { show: true, text, color: 'error' }
+}
+
 interface Author {
   id: number;
   name: string;
@@ -26,7 +31,7 @@ interface imageObject {
 interface requestParams {
   offset?: number;
   limit?: number;
-  tags?: string | string[];
+  tags?: string[];
   author?: string | number;
   desc?: boolean;
   ratioRange?: [number, number];
@@ -35,7 +40,6 @@ interface requestParams {
 }
 
 
-let images = ref<[imageObject] | undefined>();
 let is_empty = ref(false);
 
 let refresh = ref(true)
@@ -50,25 +54,24 @@ let params = ref<requestParams>({
 
 let limit = ref<number>(40);
 
+let allImages: imageObject[] = []
 let getImagesFuncLock = ref(false)
 const getImages = async () => {
   if (getImagesFuncLock.value) return
   getImagesFuncLock.value = true
   let tagQuery
-  if (params.value.tags) {
-    tagQuery = typeof params.value.tags === "string"
-      ? params.value.tags
-      : params.value.tags.join(",");
+  if (params.value.tags?.length) {
+    tagQuery = params.value.tags.join(",");
   }
-  let accessibleFilter
-  if (params.value.accessible && params.value.inaccessible) {
-    accessibleFilter = "all"
-  } else if (params.value.accessible === true) {
-    accessibleFilter = 'true'
-  } else if (params.value.inaccessible === true) {
-    accessibleFilter = 'false'
+  // accessible: 对应后端 image.accessible 字段，仅接受 "true"/"false"
+  // 两个都勾选或都不勾选 → 不发参数 → 后端不过滤 → 管理员看到全部图片
+  // 仅勾选 accessible → ?accessible=true → 只看 accessible=true 的图片
+  // 仅勾选 inaccessible → ?accessible=false → 只看 accessible=false 的图片
+  let accessibleParam = ''
+  if (params.value.accessible !== params.value.inaccessible) {
+    accessibleParam = params.value.accessible ? '&accessible=true' : '&accessible=false'
   }
-  let query = `?offset=${currentOffset.value}&limit=${limit.value}${tagQuery ? `&tags=${tagQuery}&` : ""}${params.value.author ? `&author=${params.value.author}` : ''}${params.value.ratioRange ? `&ratio_floor=${params.value.ratioRange[0]}&ratio_ceil=${params.value.ratioRange[1]}` : ''}${accessibleFilter ? `&accessible=${accessibleFilter}` : ''}${params.value.desc ? `&desc=true` : '&desc=false'}`
+  let query = `?offset=${currentOffset.value}&limit=${limit.value}${tagQuery ? `&tags=${tagQuery}&` : ""}${params.value.author ? `&author=${params.value.author}` : ''}${params.value.ratioRange ? `&ratio_floor=${params.value.ratioRange[0]}&ratio_ceil=${params.value.ratioRange[1]}` : ''}${accessibleParam}${params.value.desc ? `&desc=true` : '&desc=false'}`
   await Axios.get(
     `/list${query}`,
   ).then((res) => {
@@ -79,8 +82,8 @@ const getImages = async () => {
           primary_color: img.primary_color?.rgb ?? img.primary_color ?? null,
           accessible: img.accessible ?? undefined,
         }))
-        images.value = mapped;
-        cols.value = calcImageCol(mapped);
+        allImages.push(...mapped)
+        cols.value = calcImageCol(allImages);
         currentOffset.value += limit.value as number;
         if (res.data.length < limit.value) {
           is_empty.value = true;
@@ -92,51 +95,23 @@ const getImages = async () => {
     }
     getImagesFuncLock.value = false
   }
-  ).catch(() => {
+  ).catch((e) => {
     getImagesFuncLock.value = false
+    showError(e.response?.data?.message ?? '加载图片列表失败')
   });
 };
 
-let col1: imageObject[] = [];
-let col2: imageObject[] = [];
-let col3: imageObject[] = [];
-let colHeight = {
-  col1: 0,
-  col2: 0,
-  col3: 0,
-};
 let colWidth = ref(Math.floor(window.innerWidth / 7.5));
-const calcImageCol = (images: [imageObject]) => {
-  for (let image of images) {
-    let h = 1 / image.aspect_ratio;
-    let minINdex = getMinCol(colHeight);
-    switch (minINdex) {
-      case 0:
-        col1.push(image);
-        colHeight.col1 += h;
-        break;
-      case 1:
-        col2.push(image);
-        colHeight.col2 += h;
-        break;
-      case 2:
-        col3.push(image);
-        colHeight.col3 += h;
-    }
+const calcImageCol = (images: imageObject[]): imageObject[][] => {
+  const cols: imageObject[][] = [[], [], []];
+  const heights = [0, 0, 0];
+  for (const image of images) {
+    const h = 1 / image.aspect_ratio;
+    const minIndex = heights.indexOf(Math.min(...heights));
+    cols[minIndex].push(image);
+    heights[minIndex] += h;
   }
-  return [col1, col2, col3];
-};
-
-const getMinCol = (colHeight: { col1: number; col2: number; col3: number }) => {
-  let m = Math.min(colHeight.col1, colHeight.col2, colHeight.col3);
-  switch (m) {
-    case colHeight.col1:
-      return 0;
-    case colHeight.col2:
-      return 1;
-    case colHeight.col3:
-      return 2;
-  }
+  return cols;
 };
 let cols = ref<imageObject[][]>();
 let currentOffset = ref<number>(0);
@@ -149,14 +124,19 @@ const loadData = async ({ done }: any) => {
     done("ok");
   }
 };
+let resizeTimeout: ReturnType<typeof setTimeout> | null = null;
 const onResize = () => {
-  colWidth.value = Math.floor(window.innerWidth / 7.5);
+  if (resizeTimeout) clearTimeout(resizeTimeout);
+  resizeTimeout = setTimeout(() => {
+    colWidth.value = Math.floor(window.innerWidth / 7.5);
+  }, 150);
 };
 onMounted(() => {
   addEventListener("resize", onResize);
 });
 onUnmounted(() => {
   removeEventListener("resize", onResize);
+  if (resizeTimeout) clearTimeout(resizeTimeout);
 });
 
 let overlay = ref(false);
@@ -187,6 +167,10 @@ const showDetail = (imageId: number) => {
       imgShowHeight.value =
         imgShowWidth.value / imageDetailData.value.aspect_ratio;
     }
+  }).catch((e) => {
+    overlay.value = false
+    imageDetailData.value = null
+    showError(e.response?.data?.message ?? '加载图片详情失败')
   });
 };
 const overlayClosed = () => {
@@ -203,6 +187,8 @@ const toUrl = (url: string) => {
 let totalImages = ref(100);
 Axios.get('/statistic').then(res => {
   totalImages.value = res.data.illust_count
+}).catch((e) => {
+  console.error('Failed to load statistics:', e)
 })
 
 const patchImage = (image: imageObject) => {
@@ -219,6 +205,7 @@ const patchImage = (image: imageObject) => {
   }).catch((e) => {
     console.error(e)
     image.accessible = !newValue
+    showError(e.response?.data?.message ?? '更新图片状态失败')
   }).finally(() => {
     image.patchLoading = false
   });
@@ -243,28 +230,24 @@ const filterUpdate = async () => {
   })
 }
 const clear = () => {
-  colHeight = {
-    col1: 0,
-    col2: 0,
-    col3: 0
-  }
-  col1 = []
-  col2 = []
-  col3 = []
+  allImages = []
   cols.value = [[], [], []];
-  images.value = undefined;
   currentOffset.value = 0
 }
-let tags = ref([]);
+interface Tag { name: string; search_string: string; translated_name: string; }
+let tags = ref<Tag[]>([]);
+let selectionTags = ref<string[]>([]);
 let tagSelectorLoading = ref(false)
 const getTags = () => {
+  tagSelectorLoading.value = true
   Axios.get("/tags").then((res) => {
-    tagSelectorLoading.value = true
     if (res.status === 200) {
       tags.value = res.data
-      tagSelectorLoading.value = false
-      return res.data
     }
+  }).catch((e) => {
+    console.error('Failed to load tags:', e)
+  }).finally(() => {
+    tagSelectorLoading.value = false
   })
 }
 getTags()
@@ -288,18 +271,19 @@ getTags()
 
           </v-slider>
           <v-autocomplete :loading="tagSelectorLoading" closable-chips clearable chips multiple label="标签/Tags"
-            v-model="params.tags" :items="tags" item-title="search_string" item-value="name">
+            v-model="selectionTags" :items="tags" item-title="search_string" item-value="name"
+            @update:model-value="params.tags = $event">
             <template v-slot:item="{ props, item }">
               <v-list-item v-bind="props" :subtitle="item.raw.translated_name" :title="item.raw.name"></v-list-item>
             </template>
           </v-autocomplete>
           <v-text-field v-model="params.author" label="作者/Author" />
-          <v-range-slider thumb-label="true" min="0" max="10" v-model="params.ratioRange" strict
+          <v-range-slider thumb-label min="0" max="10" v-model="params.ratioRange" strict
             label="宽高比/Ratio Range"></v-range-slider>
           <v-checkbox v-model="params.desc" label="倒序排列"></v-checkbox>
           <template v-if='store.user.token'>
-            <v-checkbox v-model="params.accessible" label="Only Accessible"></v-checkbox>
-            <v-checkbox v-model="params.inaccessible" label="Only Not Accessible"></v-checkbox>
+            <v-checkbox v-model="params.accessible" label="Accessible"></v-checkbox>
+            <v-checkbox v-model="params.inaccessible" label="Inaccessible"></v-checkbox>
           </template>
         </v-form>
         <v-card-actions>
@@ -331,7 +315,7 @@ getTags()
             }, 1fr)`,
           height: `${imageDetailData.aspect_ratio < 0.7 ? '4.3rem' : '2rem'}`,
         }" v-if="imageDetailData.colors">
-          <div v-for="color of imageDetailData.colors.colors">
+          <div v-for="(color, index) of imageDetailData.colors.colors" :key="index">
             <v-tooltip location="top" class="color-card" :text="`rgb(${color[0]}, ${color[1]}, ${color[2]})`">
               <template class="color-card" v-slot:activator="{ props }">
                 <v-card hover class="color-card" v-bind="props" :style="{
@@ -348,7 +332,7 @@ getTags()
         <div class="info" v-if="imageDetailData">
           <h1 class="text-h4">{{ imageDetailData.title }}</h1>
           <div class="d-flex flex-wrap ga-2">
-            <v-chip class="tag" v-for="tag of imageDetailData.tags">
+            <v-chip class="tag" v-for="(tag, tagIndex) of imageDetailData.tags" :key="tagIndex">
               <div class="tag-info">
                 <div>{{ tag.name }}</div>
                 <div class="extra">{{ tag.translated_name }}</div>
@@ -396,8 +380,8 @@ getTags()
   <v-container v-if="cols" class="container">
     <v-infinite-scroll v-if="refresh" :onLoad="loadData">
       <v-row no-gutters>
-        <v-col v-for="colIndex of [0, 1, 2]">
-          <template v-for="image of cols[colIndex]">
+        <v-col v-for="colIndex of [0, 1, 2]" :key="colIndex">
+          <template v-for="image of cols[colIndex]" :key="image.id">
             <v-hover v-slot="{ isHovering, props }">
               <v-img v-bind="props" class="image" :src="image.src + '/scale_to_1080x1080'" @load="image.loaded = true"
                 :width="colWidth" :height="colWidth / image.aspect_ratio" :style="{
@@ -414,7 +398,7 @@ getTags()
                     <v-progress-circular color="grey-lighten-4" indeterminate></v-progress-circular>
                   </div>
                 </template>
-                <v-overlay :model-value="isHovering" class="img-overlay" :width="colWidth"
+                <v-overlay :model-value="isHovering ?? false" class="img-overlay" :width="colWidth"
                   :height="colWidth / image.aspect_ratio" contained :content-props="{ class: 'overlay-content' }">
                   <v-btn v-if='store.user.token' :loading="image.patchLoading"
                     :color="image.patchLoading ? 'warning' : image.accessible ? 'green' : 'red'" class="admin-btn"
@@ -440,6 +424,10 @@ getTags()
       </template>
     </v-infinite-scroll>
   </v-container>
+
+  <v-snackbar v-model="snackbar.show" :color="snackbar.color" timeout="3000" location="top">
+    {{ snackbar.text }}
+  </v-snackbar>
 </template>
 <style scoped lang="scss">
 .image {
