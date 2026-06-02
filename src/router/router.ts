@@ -1,4 +1,5 @@
 import { createWebHistory, createRouter } from "vue-router";
+import { useUserStore } from "../store/store";
 const routes = [
   {
     path: "/login",
@@ -95,5 +96,13 @@ const router = createRouter({
   history: createWebHistory(),
   routes,
 });
+router.beforeEach((to, from, next) => {
+  const store = useUserStore()
+  if (to.meta.requireAuth && !store.user.token) {
+    next({ name: 'login' })
+  } else {
+    next()
+  }
+})
 export default router;
 export { routes };
