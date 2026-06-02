@@ -67,14 +67,21 @@ const getImages = async () => {
   // 两个都勾选或都不勾选 → 不发参数 → 后端不过滤 → 管理员看到全部图片
   // 仅勾选 accessible → ?accessible=true → 只看 accessible=true 的图片
   // 仅勾选 inaccessible → ?accessible=false → 只看 accessible=false 的图片
-  let accessibleParam = ''
-  if (params.value.accessible !== params.value.inaccessible) {
-    accessibleParam = params.value.accessible ? '&accessible=true' : '&accessible=false'
+  const queryParams: Record<string, any> = {
+    offset: currentOffset.value,
+    limit: limit.value,
+    desc: params.value.desc,
+  };
+  if (tagQuery) queryParams.tags = tagQuery;
+  if (params.value.author) queryParams.author = params.value.author;
+  if (params.value.ratioRange) {
+    queryParams.ratio_floor = params.value.ratioRange[0];
+    queryParams.ratio_ceil = params.value.ratioRange[1];
   }
-  let query = `?offset=${currentOffset.value}&limit=${limit.value}${tagQuery ? `&tags=${tagQuery}&` : ""}${params.value.author ? `&author=${params.value.author}` : ''}${params.value.ratioRange ? `&ratio_floor=${params.value.ratioRange[0]}&ratio_ceil=${params.value.ratioRange[1]}` : ''}${accessibleParam}${params.value.desc ? `&desc=true` : '&desc=false'}`
-  await Axios.get(
-    `/list${query}`,
-  ).then((res) => {
+  if (params.value.accessible !== params.value.inaccessible) {
+    queryParams.accessible = params.value.accessible;
+  }
+  await Axios.get('/list', { params: queryParams }).then((res) => {
     if (res.status === 200) {
       if (res.data) {
         const mapped = res.data.map((img: any) => ({
