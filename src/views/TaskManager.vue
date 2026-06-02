@@ -338,6 +338,8 @@ const refreshSubtask = async (rootId: string) => {
 };
 
 const applySubtaskFilter = (rootId: string) => {
+  const state = subtaskMap[rootId];
+  if (state) state.page = 1;
   fetchSubtasks(rootId);
 };
 
