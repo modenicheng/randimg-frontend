@@ -115,7 +115,6 @@ const calcImageCol = (images: imageObject[]): imageObject[][] => {
 };
 let cols = ref<imageObject[][]>();
 let currentOffset = ref<number>(0);
-getImages();
 const loadData = async ({ done }: any) => {
   await getImages();
   if (is_empty.value) {
@@ -132,6 +131,13 @@ const onResize = () => {
   }, 150);
 };
 onMounted(() => {
+  getImages()
+  getTags()
+  Axios.get('/statistic').then(res => {
+    totalImages.value = res.data.illust_count
+  }).catch((e) => {
+    console.error('Failed to load statistics:', e)
+  })
   addEventListener("resize", onResize);
 });
 onUnmounted(() => {
@@ -180,16 +186,18 @@ let imgShowWidth = ref();
 let imgShowHeight = ref();
 
 const toUrl = (url: string) => {
-  window.open(url, "_blank");
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      window.open(parsed.href, "_blank", "noopener,noreferrer");
+    }
+  } catch {
+    // Invalid URL — ignore
+  }
 };
 
 
 let totalImages = ref(100);
-Axios.get('/statistic').then(res => {
-  totalImages.value = res.data.illust_count
-}).catch((e) => {
-  console.error('Failed to load statistics:', e)
-})
 
 const patchImage = (image: imageObject) => {
   image.patchLoading = true
@@ -250,7 +258,6 @@ const getTags = () => {
     tagSelectorLoading.value = false
   })
 }
-getTags()
 </script>
 <template>
   <v-dialog max-width="600">

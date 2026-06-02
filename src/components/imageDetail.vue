@@ -115,7 +115,14 @@ const getImageDetail = async () => {
 };
 
 const toUrl = (url: string) => {
-  window.open(url, "_blank");
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      window.open(parsed.href, "_blank", "noopener,noreferrer");
+    }
+  } catch {
+    // Invalid URL — ignore
+  }
 };
 
 onMounted(() => {

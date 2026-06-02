@@ -16,7 +16,7 @@
 // }
 </style>
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, onMounted } from 'vue';
 import Axios from '../axios/axios';
 
 let url = ref()
@@ -81,6 +81,8 @@ const getImage = () => {
         })
 }
 
-getImage()
+onMounted(() => {
+    getImage()
+})
 
 </script>
