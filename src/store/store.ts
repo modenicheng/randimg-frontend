@@ -1,17 +1,21 @@
 import { defineStore } from 'pinia'
 
+interface UserState {
+    username: string | null
+    token: string | null
+    theme: 'light' | 'dark'
+}
+
 const useUserStore = defineStore('user', {
-    state: () => {
-        return {
-            user: {
-                username: null,
-                token: null,
-                theme: 'light',
-            }
+    state: (): { user: UserState } => ({
+        user: {
+            username: null,
+            token: null,
+            theme: 'light',
         }
-    },
+    }),
     actions: {
-        setTheme (theme: string) {
+        setTheme (theme: 'light' | 'dark') {
             this.user.theme = theme
         }
     },

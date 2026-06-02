@@ -1,6 +1,6 @@
-<script setup>
+<script setup lang="ts">
 import { useRouter, useRoute } from "vue-router";
-import { ref } from "vue";
+import { computed } from "vue";
 import { routes } from "../router/router";
 import Axios from "../axios/axios";
 import { useTheme } from 'vuetify'
@@ -12,16 +12,12 @@ const icons = {mdiThemeLightDark}
 const store = useUserStore()
 const router = useRouter();
 const route = useRoute();
-let navList = ref([]);
-for (let item of routes) {
-  if (item.name === "Home") {
-    for (let c of item.children) {
-      if (c.meta.navigator && (!c.meta.requireAuth || store.user.token)) {
-        navList.value.push(c);
-      }
-    }
-  }
-}
+const navList = computed(() => {
+  const home = routes.find(r => r.name === "Home")
+  return (home?.children ?? []).filter(c =>
+    c.meta.navigator && (!c.meta.requireAuth || store.user.token)
+  )
+})
 
 const theme = useTheme()
 theme.global.name.value = store.user.theme

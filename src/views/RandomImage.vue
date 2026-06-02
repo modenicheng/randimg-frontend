@@ -16,8 +16,10 @@
 // }
 </style>
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, onMounted } from 'vue';
 import Axios from '../axios/axios';
+import { normalizeColorPalette, normalizePrimaryColor } from '../utils/colorNormalization';
+import type { Author, ImageTag } from '../types/api';
 
 let url = ref()
 let loading = ref(true)
@@ -33,30 +35,14 @@ export interface RandomImageRequest {
     src: string;
     source_id: number;
     source_url: string;
-    tags: Tag[];
+    tags: ImageTag[];
     title: string;
     width: number;
     [property: string]: any;
 }
 
-export interface Author {
-    homepage?: string;
-    id?: number;
-    name?: string;
-    platform?: string;
-    platform_id?: number | string;
-    [property: string]: any;
-}
-
 export interface Colors {
     colors: Array<number[]>;
-    [property: string]: any;
-}
-
-export interface Tag {
-    id: number;
-    name: string;
-    translated_name?: string;
     [property: string]: any;
 }
 
@@ -67,20 +53,16 @@ const getImage = () => {
     Axios.get('/')
         .then(res => {
             let data = res.data
-            // 转换 colors 格式
-            if (Array.isArray(data.colors) && data.colors.length && data.colors[0]?.rgb) {
-                data.colors = { colors: data.colors.map((c: any) => c.rgb) }
-            }
-            // 转换 primary_color 格式
-            if (data.primary_color?.rgb) {
-                data.primary_color = data.primary_color.rgb
-            }
+            normalizeColorPalette(data)
+            data.primary_color = normalizePrimaryColor(data.primary_color)
             url.value = data.src
             image.value = data
             loading.value = false
         })
 }
 
-getImage()
+onMounted(() => {
+    getImage()
+})
 
 </script>

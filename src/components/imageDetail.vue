@@ -53,11 +53,11 @@
           <div class="text-body-1 font-weight-medium">{{ imageDetailData.author.name }}</div>
           <div class="text-body-2">{{ imageDetailData.author.platform }}</div>
           <div class="text-body-2">{{ imageDetailData.author.platform_id }}</div>
-          <v-btn variant="text" density="compact" @click="toUrl(`https://www.pixiv.net/users/${imageDetailData.author.platform_id}`)"><v-icon size="small" class="mr-1">mdi-open-in-new</v-icon>画师主页</v-btn>
+          <v-btn variant="text" density="compact" @click="openExternalUrl(`https://www.pixiv.net/users/${imageDetailData.author.platform_id}`)"><v-icon size="small" class="mr-1">mdi-open-in-new</v-icon>画师主页</v-btn>
         </div>
         <div class="origin mt-4">
           <h3 class="text-h6">原作信息 / Origin</h3>
-          <v-btn variant="text" density="compact" @click="toUrl(imageDetailData.source_url)"><v-icon size="small" class="mr-1">mdi-open-in-new</v-icon>图片源/Source</v-btn>
+          <v-btn variant="text" density="compact" @click="openExternalUrl(imageDetailData.source_url)"><v-icon size="small" class="mr-1">mdi-open-in-new</v-icon>图片源/Source</v-btn>
           <div class="text-body-2">
             分辨率/Resolution: {{ imageDetailData.width }}×{{ imageDetailData.height }}
           </div>
@@ -65,7 +65,7 @@
         </div>
       </div>
       <v-card-actions>
-        <v-btn class="font-weight-bold" @click="toUrl(imageDetailData.src)" text="在新标签页中打开此图像"></v-btn>
+        <v-btn class="font-weight-bold" @click="openExternalUrl(imageDetailData.src)" text="在新标签页中打开此图像"></v-btn>
       </v-card-actions>
     </v-card>
   </div>
@@ -74,6 +74,9 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue';
 import Axios from '../axios/axios';
+import { normalizeColorPalette } from '../utils/colorNormalization';
+import { computeImageDisplaySize } from '../utils/imageSizing';
+import { openExternalUrl } from '../utils/url';
 
 const props = defineProps<{
   imageId: string;
@@ -92,30 +95,16 @@ const getImageDetail = async () => {
   try {
     const res = await Axios.get(`/image/${props.imageId}`);
     const d = res.data
-    // 转换 colors 格式：后端返回 [{rgb:[r,g,b], lab:[l,a,b]}, ...] → 前端需要 {colors: [[r,g,b], ...]}
-    if (Array.isArray(d.colors) && d.colors.length && d.colors[0]?.rgb) {
-      d.colors = { colors: d.colors.map((c: any) => c.rgb) }
-    }
+    normalizeColorPalette(d)
     imageDetailData.value = d;
-    if (imageDetailData.value.aspect_ratio < 0.7) {
-      imgShowHeight.value = 0.8 * window.innerHeight;
-      imgShowWidth.value = imgShowHeight.value * imageDetailData.value.aspect_ratio;
-    } else if (imageDetailData.value.aspect_ratio < 1.25) {
-      imgShowWidth.value = 0.3 * window.innerWidth;
-      imgShowHeight.value = imgShowWidth.value / imageDetailData.value.aspect_ratio;
-    } else {
-      imgShowWidth.value = 0.5 * window.innerWidth;
-      imgShowHeight.value = imgShowWidth.value / imageDetailData.value.aspect_ratio;
-    }
+    const { width, height } = computeImageDisplaySize(imageDetailData.value.aspect_ratio);
+    imgShowWidth.value = width;
+    imgShowHeight.value = height;
   } catch (e: any) {
     error.value = e?.message || 'Failed to load image detail';
   } finally {
     loading.value = false;
   }
-};
-
-const toUrl = (url: string) => {
-  window.open(url, "_blank");
 };
 
 onMounted(() => {

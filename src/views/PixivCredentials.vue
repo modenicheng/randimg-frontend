@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import Axios from '../axios/axios';
 import { ref, onMounted } from 'vue';
+import { formatDate } from '../utils/formatDate';
 
 interface PixivCredential {
   id: number;
@@ -153,11 +154,6 @@ const viewToken = async (id: number) => {
   } finally {
     tokenLoading.value = false;
   }
-};
-
-const formatDate = (s: string | null) => {
-  if (!s) return '-';
-  return new Date(s).toLocaleString();
 };
 
 onMounted(fetchCredentials);
