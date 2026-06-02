@@ -53,11 +53,11 @@
           <div class="text-body-1 font-weight-medium">{{ imageDetailData.author.name }}</div>
           <div class="text-body-2">{{ imageDetailData.author.platform }}</div>
           <div class="text-body-2">{{ imageDetailData.author.platform_id }}</div>
-          <v-btn variant="text" density="compact" @click="toUrl(`https://www.pixiv.net/users/${imageDetailData.author.platform_id}`)"><v-icon size="small" class="mr-1">mdi-open-in-new</v-icon>画师主页</v-btn>
+          <v-btn variant="text" density="compact" @click="openExternalUrl(`https://www.pixiv.net/users/${imageDetailData.author.platform_id}`)"><v-icon size="small" class="mr-1">mdi-open-in-new</v-icon>画师主页</v-btn>
         </div>
         <div class="origin mt-4">
           <h3 class="text-h6">原作信息 / Origin</h3>
-          <v-btn variant="text" density="compact" @click="toUrl(imageDetailData.source_url)"><v-icon size="small" class="mr-1">mdi-open-in-new</v-icon>图片源/Source</v-btn>
+          <v-btn variant="text" density="compact" @click="openExternalUrl(imageDetailData.source_url)"><v-icon size="small" class="mr-1">mdi-open-in-new</v-icon>图片源/Source</v-btn>
           <div class="text-body-2">
             分辨率/Resolution: {{ imageDetailData.width }}×{{ imageDetailData.height }}
           </div>
@@ -65,7 +65,7 @@
         </div>
       </div>
       <v-card-actions>
-        <v-btn class="font-weight-bold" @click="toUrl(imageDetailData.src)" text="在新标签页中打开此图像"></v-btn>
+        <v-btn class="font-weight-bold" @click="openExternalUrl(imageDetailData.src)" text="在新标签页中打开此图像"></v-btn>
       </v-card-actions>
     </v-card>
   </div>
@@ -76,6 +76,7 @@ import { ref, onMounted, watch } from 'vue';
 import Axios from '../axios/axios';
 import { normalizeColorPalette } from '../utils/colorNormalization';
 import { computeImageDisplaySize } from '../utils/imageSizing';
+import { openExternalUrl } from '../utils/url';
 
 const props = defineProps<{
   imageId: string;
@@ -103,17 +104,6 @@ const getImageDetail = async () => {
     error.value = e?.message || 'Failed to load image detail';
   } finally {
     loading.value = false;
-  }
-};
-
-const toUrl = (url: string) => {
-  try {
-    const parsed = new URL(url);
-    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
-      window.open(parsed.href, "_blank", "noopener,noreferrer");
-    }
-  } catch {
-    // Invalid URL — ignore
   }
 };
 

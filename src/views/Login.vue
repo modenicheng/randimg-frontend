@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue';
+import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 import siLog from 'si-log'
 import Axios from '../axios/axios';
@@ -37,7 +37,7 @@ const submit = () => {
 }
 let valid = ref(false)
 let rules = [
-    value => {
+    (value: string) => {
         if (value) {
             return true
         }

@@ -2,6 +2,7 @@
 import Axios from '../axios/axios';
 import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { mdiPlus, mdiCancel, mdiStopCircleOutline, mdiBroom, mdiChevronRight, mdiChevronDown, mdiFormatListChecks, mdiCheckboxBlankOutline } from '@mdi/js';
+import { formatDate } from '../utils/formatDate';
 
 /** Core task data returned by both /tasks/roots and /tasks/{id}/subtasks. */
 interface Task {
@@ -523,10 +524,6 @@ const taskTitle = (t: Task): string => {
   return label + (hint ? ': ' + hint : '');
 };
 
-const formatDate = (s: string | null) => {
-  if (!s) return '-';
-  return new Date(s).toLocaleString();
-};
 
 const formatJson = (v: any): string => {
   if (v === null || v === undefined) return '-';

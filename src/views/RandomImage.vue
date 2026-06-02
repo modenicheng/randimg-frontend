@@ -19,6 +19,7 @@
 import { ref, onMounted } from 'vue';
 import Axios from '../axios/axios';
 import { normalizeColorPalette, normalizePrimaryColor } from '../utils/colorNormalization';
+import type { Author, ImageTag } from '../types/api';
 
 let url = ref()
 let loading = ref(true)
@@ -34,30 +35,14 @@ export interface RandomImageRequest {
     src: string;
     source_id: number;
     source_url: string;
-    tags: Tag[];
+    tags: ImageTag[];
     title: string;
     width: number;
     [property: string]: any;
 }
 
-export interface Author {
-    homepage?: string;
-    id?: number;
-    name?: string;
-    platform?: string;
-    platform_id?: number | string;
-    [property: string]: any;
-}
-
 export interface Colors {
     colors: Array<number[]>;
-    [property: string]: any;
-}
-
-export interface Tag {
-    id: number;
-    name: string;
-    translated_name?: string;
     [property: string]: any;
 }
 

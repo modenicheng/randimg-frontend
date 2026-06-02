@@ -3,8 +3,10 @@ import Axios from "../axios/axios";
 import { onMounted, onUnmounted, ref, nextTick } from 'vue';
 import { useUserStore } from "../store/store";
 import { mdiFilterOutline } from "@mdi/js";
-import { normalizeColorPalette, normalizePrimaryColor } from "../utils/colorNormalization";
-import { computeImageDisplaySize } from "../utils/imageSizing";
+import { normalizePrimaryColor } from "../utils/colorNormalization";
+import ImageDetail from '../components/imageDetail.vue';
+import { openExternalUrl } from "../utils/url";
+import type { Author, TagCatalogEntry } from "../types/api";
 const store = useUserStore()
 
 const snackbar = ref({ show: false, text: '', color: 'error' })
@@ -12,12 +14,6 @@ const showError = (text: string) => {
   snackbar.value = { show: true, text, color: 'error' }
 }
 
-interface Author {
-  id: number;
-  name: string;
-  platform: string;
-  platform_id: number;
-}
 interface imageObject {
   id: number;
   author: Author;
@@ -155,42 +151,15 @@ onUnmounted(() => {
 });
 
 let overlay = ref(false);
-let imageDetailData = ref();
+let selectedImageId = ref<string | null>(null);
 const showDetail = (imageId: number) => {
-  if (imageDetailData.value) {
-    imageDetailData.value.loaded = false;
-  }
-
+  selectedImageId.value = String(imageId);
   overlay.value = true;
-  Axios.get(`/image/${imageId}`).then((res) => {
-    const d = res.data
-    normalizeColorPalette(d)
-    imageDetailData.value = d;
-    const { width, height } = computeImageDisplaySize(imageDetailData.value.aspect_ratio);
-    imgShowWidth.value = width;
-    imgShowHeight.value = height;
-  }).catch((e) => {
-    overlay.value = false
-    imageDetailData.value = null
-    showError(e.response?.data?.message ?? '加载图片详情失败')
-  });
 };
 const overlayClosed = () => {
-  imageDetailData.value = null;
+  selectedImageId.value = null;
 };
-let imgShowWidth = ref();
-let imgShowHeight = ref();
 
-const toUrl = (url: string) => {
-  try {
-    const parsed = new URL(url);
-    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
-      window.open(parsed.href, "_blank", "noopener,noreferrer");
-    }
-  } catch {
-    // Invalid URL — ignore
-  }
-};
 
 
 let totalImages = ref(100);
@@ -200,9 +169,13 @@ const patchImage = (image: imageObject) => {
   const newValue = !image.accessible
   Axios.patch(`/image/${image.id}`, { accessible: newValue }).then(res => {
     if (res.status === 200) {
+      const prevLoaded = image.loaded
       Object.assign(image, res.data)
-      // Re-normalize primary_color if it was overwritten with raw API format
-      image.primary_color = normalizePrimaryColor(res.data.primary_color);
+      image.loaded = prevLoaded
+      // Re-normalize primary_color only if PATCH response actually included it
+      if (res.data.primary_color !== undefined) {
+        image.primary_color = normalizePrimaryColor(res.data.primary_color);
+      }
     }
   }).catch((e) => {
     console.error(e)
@@ -236,8 +209,7 @@ const clear = () => {
   cols.value = [[], [], []];
   currentOffset.value = 0
 }
-interface Tag { name: string; search_string: string; translated_name: string; }
-let tags = ref<Tag[]>([]);
+let tags = ref<TagCatalogEntry[]>([]);
 let selectionTags = ref<string[]>([]);
 let tagSelectorLoading = ref(false)
 const getTags = () => {
@@ -296,87 +268,9 @@ const getTags = () => {
     </template>
   </v-dialog>
 
-  <v-overlay scroll-strategy="none" v-if="imageDetailData" z-index="10000" v-model="overlay"
-    :class="imageDetailData.aspect_ratio >= 1.25 ? 'overlay' : 'overlay align-center'" @after-leave="overlayClosed()">
-    <div class="container-cols" v-if="imageDetailData" :style="{
-      gridTemplateColumns:
-        imageDetailData.aspect_ratio >= 1.25 ? '1fr' : 'auto 1fr',
-    }">
-      <div class="img-container">
-        <v-img :lazy-src="imageDetailData.src + '/scale_to_1080x1080'" :width="imgShowWidth" :height="imgShowHeight"
-          :src="imageDetailData.src" @load="imageDetailData.loaded = true">
-          <template v-slot:placeholder v-if="!imageDetailData.loaded">
-            <div class="d-flex align-center justify-center fill-height">
-              <v-progress-circular color="blue-lighten-4" indeterminate></v-progress-circular>
-            </div>
-          </template>
-        </v-img>
-        <div class="color-container" :style="{
-          gridTemplateColumns: `repeat(${imageDetailData.aspect_ratio < 0.7 ? '5' : '10'
-            }, 1fr)`,
-          height: `${imageDetailData.aspect_ratio < 0.7 ? '4.3rem' : '2rem'}`,
-        }" v-if="imageDetailData.colors">
-          <div v-for="(color, index) of imageDetailData.colors.colors" :key="index">
-            <v-tooltip location="top" class="color-card" :text="`rgb(${color[0]}, ${color[1]}, ${color[2]})`">
-              <template class="color-card" v-slot:activator="{ props }">
-                <v-card hover class="color-card" v-bind="props" :style="{
-                  backgroundColor: `rgb(${color[0]}, ${color[1]}, ${color[2]})`,
-                }"></v-card>
-              </template>
-            </v-tooltip>
-          </div>
-        </div>
-      </div>
-      <v-card class="info" :style="{
-        width: `${imgShowWidth}px`,
-      }">
-        <div class="info" v-if="imageDetailData">
-          <h1 class="text-h4">{{ imageDetailData.title }}</h1>
-          <div class="d-flex flex-wrap ga-2">
-            <v-chip class="tag" v-for="(tag, tagIndex) of imageDetailData.tags" :key="tagIndex">
-              <div class="tag-info">
-                <div>{{ tag.name }}</div>
-                <div class="extra">{{ tag.translated_name }}</div>
-              </div>
-            </v-chip>
-          </div>
-          <v-divider></v-divider>
-          <div class="author mt-4">
-            <h3 class="text-h6">画师信息 / Author</h3>
-            <div class="text-body-1 font-weight-medium">{{ imageDetailData.author.name }}</div>
-            <div class="text-body-2">{{ imageDetailData.author.platform }}</div>
-            <div class="text-body-2">{{ imageDetailData.author.platform_id }}</div>
-            <v-btn variant="text" density="compact" @click="
-              toUrl(
-                `https://www.pixiv.net/users/${imageDetailData.author.platform_id}`
-              )
-              ">
-              <v-icon size="small" class="mr-1">mdi-open-in-new</v-icon>
-              画师主页 -
-              {{
-                `https://www.pixiv.net/users/${imageDetailData.author.platform_id}`
-              }}
-            </v-btn>
-          </div>
-          <div class="origin mt-4">
-            <h3 class="text-h6">原作信息 / Origin</h3>
-            <v-btn variant="text" density="compact" @click="toUrl(imageDetailData.source_url)">
-              <v-icon size="small" class="mr-1">mdi-open-in-new</v-icon>
-              图片源/Source - {{ imageDetailData.source_url }}
-            </v-btn>
-            <div class="text-body-2">
-              分辨率/Resolution: {{ imageDetailData.width }}×{{
-                imageDetailData.height
-              }}
-            </div>
-            <div class="text-body-2">宽高比/AspectRatio: {{ imageDetailData.aspect_ratio }}</div>
-          </div>
-        </div>
-        <v-card-actions>
-          <v-btn class="font-weight-bold" @click="toUrl(imageDetailData.src)" text="在新标签页中打开此图像"></v-btn>
-        </v-card-actions>
-      </v-card>
-    </div>
+  <v-overlay scroll-strategy="none" v-if="selectedImageId" z-index="10000" v-model="overlay"
+    class="overlay align-center" @after-leave="overlayClosed()">
+    <ImageDetail :imageId="selectedImageId" />
   </v-overlay>
   <v-container v-if="cols" class="container">
     <v-infinite-scroll v-if="refresh" :onLoad="loadData">

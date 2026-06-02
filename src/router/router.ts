@@ -96,7 +96,7 @@ const router = createRouter({
   history: createWebHistory(),
   routes,
 });
-router.beforeEach((to, from, next) => {
+router.beforeEach((to, _from, next) => {
   const store = useUserStore()
   if (to.meta.requireAuth && !store.user.token) {
     next({ name: 'login' })
