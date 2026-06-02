@@ -3,6 +3,8 @@ import Axios from "../axios/axios";
 import { onMounted, onUnmounted, ref, nextTick } from 'vue';
 import { useUserStore } from "../store/store";
 import { mdiFilterOutline } from "@mdi/js";
+import { normalizeColorPalette, normalizePrimaryColor } from "../utils/colorNormalization";
+import { computeImageDisplaySize } from "../utils/imageSizing";
 const store = useUserStore()
 
 const snackbar = ref({ show: false, text: '', color: 'error' })
@@ -86,7 +88,7 @@ const getImages = async () => {
       if (res.data) {
         const mapped = res.data.map((img: any) => ({
           ...img,
-          primary_color: img.primary_color?.rgb ?? img.primary_color ?? null,
+          primary_color: normalizePrimaryColor(img.primary_color),
           accessible: img.accessible ?? undefined,
         }))
         allImages.push(...mapped)
@@ -162,24 +164,11 @@ const showDetail = (imageId: number) => {
   overlay.value = true;
   Axios.get(`/image/${imageId}`).then((res) => {
     const d = res.data
-    d.colors = Array.isArray(d.colors) && d.colors.length && d.colors[0]?.rgb
-      ? { colors: d.colors.map((c: any) => c.rgb) }
-      : d.colors
+    normalizeColorPalette(d)
     imageDetailData.value = d;
-    if (imageDetailData.value.aspect_ratio < 0.7) {
-      imgShowHeight.value = 0.8 * window.innerHeight;
-      imgShowWidth.value =
-        imgShowHeight.value * imageDetailData.value.aspect_ratio;
-    }
-    else if (imageDetailData.value.aspect_ratio < 1.25) {
-      imgShowWidth.value = 0.3 * window.innerWidth;
-      imgShowHeight.value =
-        imgShowWidth.value / imageDetailData.value.aspect_ratio;
-    } else {
-      imgShowWidth.value = 0.5 * window.innerWidth;
-      imgShowHeight.value =
-        imgShowWidth.value / imageDetailData.value.aspect_ratio;
-    }
+    const { width, height } = computeImageDisplaySize(imageDetailData.value.aspect_ratio);
+    imgShowWidth.value = width;
+    imgShowHeight.value = height;
   }).catch((e) => {
     overlay.value = false
     imageDetailData.value = null
@@ -213,9 +202,7 @@ const patchImage = (image: imageObject) => {
     if (res.status === 200) {
       Object.assign(image, res.data)
       // Re-normalize primary_color if it was overwritten with raw API format
-      if (res.data.primary_color && typeof res.data.primary_color === 'object' && 'rgb' in res.data.primary_color) {
-        image.primary_color = res.data.primary_color.rgb;
-      }
+      image.primary_color = normalizePrimaryColor(res.data.primary_color);
     }
   }).catch((e) => {
     console.error(e)

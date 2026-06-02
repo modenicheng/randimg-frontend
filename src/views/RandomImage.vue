@@ -18,6 +18,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import Axios from '../axios/axios';
+import { normalizeColorPalette, normalizePrimaryColor } from '../utils/colorNormalization';
 
 let url = ref()
 let loading = ref(true)
@@ -67,14 +68,8 @@ const getImage = () => {
     Axios.get('/')
         .then(res => {
             let data = res.data
-            // 转换 colors 格式
-            if (Array.isArray(data.colors) && data.colors.length && data.colors[0]?.rgb) {
-                data.colors = { colors: data.colors.map((c: any) => c.rgb) }
-            }
-            // 转换 primary_color 格式
-            if (data.primary_color?.rgb) {
-                data.primary_color = data.primary_color.rgb
-            }
+            normalizeColorPalette(data)
+            data.primary_color = normalizePrimaryColor(data.primary_color)
             url.value = data.src
             image.value = data
             loading.value = false
