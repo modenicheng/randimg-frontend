@@ -4,7 +4,7 @@ import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from
 import { mdiPlus, mdiCancel, mdiStopCircleOutline, mdiBroom, mdiChevronRight, mdiChevronDown, mdiFormatListChecks, mdiCheckboxBlankOutline } from '@mdi/js';
 import { formatDate } from '../utils/formatDate';
 
-/** Core task data returned by both /tasks/roots and /tasks/{id}/subtasks. */
+/** Core task data returned by both /tasks/roots and /tasks/{id}/tree?flatten=true. */
 interface Task {
   id: string;
   jobType: string;        // camelCase from backend
@@ -16,15 +16,20 @@ interface Task {
   lastResult: string | null;
   priority: number;
   payload?: any;
+  /** Direct parent job ID (only present in flattened tree view). */
+  parent_job_id?: string;
+  /** Root job ID (only present in flattened tree view). */
+  root_job_id?: string;
 }
 
-/** Per-root subtask pagination & data state. */
+/** Per-root subtask state (flattened, server-side pagination). */
 interface SubtaskState {
   items: Task[];
-  total: number;
   loading: boolean;
   loaded: boolean;         // true after first load → only re-fetch on explicit action
   filterType: string | null;
+  // Pagination
+  total: number;
   page: number;
   pageSize: number;
 }
@@ -203,6 +208,8 @@ const parseTask = (raw: any): Task => ({
   lastResult: raw.lastResult ?? raw.last_result ?? null,
   priority:   raw.priority ?? 0,
   payload:    raw.payload,
+  parent_job_id: raw.parent_job_id,
+  root_job_id:   raw.root_job_id,
 });
 
 let fetchGeneration = 0;
@@ -253,25 +260,28 @@ const fetchRoots = async (opts?: { preserveExpanded?: boolean; silent?: boolean 
   }
 };
 
-/** Fetch subtasks for a single root (first time → full load; subsequent → silent refresh). */
+/** Fetch subtasks for a single root using the flatten tree API (server-side pagination). */
 const fetchSubtasks = async (rootId: string, silent = false) => {
   const state = subtaskMap[rootId];
   if (!state) return;
   if (!silent) state.loading = true;
   try {
-    const params: Record<string, any> = {
-      limit:  state.pageSize,
-      offset: (state.page - 1) * state.pageSize,
-    };
-    if (state.filterType) {
-      const colonIdx = state.filterType.indexOf(':');
-      params.task_type = colonIdx === -1 ? state.filterType : state.filterType.slice(0, colonIdx);
-    }
-
-    const res = await Axios.get(`/tasks/${rootId}/subtasks`, { params });
+    const offset = (state.page - 1) * state.pageSize;
+    const res = await Axios.get(`/tasks/${rootId}/tree`, {
+      params: {
+        flatten: true,
+        limit: state.pageSize,
+        offset: offset,
+      }
+    });
     if (res.status === 200) {
-      state.items = (res.data.subtasks ?? []).map(parseTask);
+      let tasks = (res.data.tasks ?? []).map(parseTask);
       state.total = res.data.total ?? 0;
+      // Apply client-side type filter if set
+      if (state.filterType) {
+        tasks = tasks.filter((t: Task) => t.jobType === state.filterType);
+      }
+      state.items = tasks;
       state.loaded = true;
     }
   } catch (e: any) {
@@ -279,6 +289,14 @@ const fetchSubtasks = async (rootId: string, silent = false) => {
   } finally {
     state.loading = false;
   }
+};
+
+/** Handle subtask page change. */
+const onSubtaskPageChange = (rootId: string, newPage: number) => {
+  const state = subtaskMap[rootId];
+  if (!state) return;
+  state.page = newPage;
+  fetchSubtasks(rootId);
 };
 
 watch([filterType, filterStatus], () => {
@@ -297,12 +315,12 @@ const onRootExpandChange = (openIds: unknown) => {
     if (!subtaskMap[id]) {
       subtaskMap[id] = {
         items: [],
-        total: 0,
         loading: false,
         loaded: false,
         filterType: null,
+        total: 0,
         page: 1,
-        pageSize: 10,
+        pageSize: 50,
       };
       // Fire and forget (don't await so expansion happens instantly)
       nextTick(() => fetchSubtasks(id));
@@ -320,17 +338,6 @@ const refreshSubtask = async (rootId: string) => {
 };
 
 const applySubtaskFilter = (rootId: string) => {
-  subtaskMap[rootId].page = 1;
-  fetchSubtasks(rootId);
-};
-
-const subtaskTotalPages = (rootId: string) => {
-  const state = subtaskMap[rootId];
-  if (!state) return 1;
-  return Math.max(1, Math.ceil(state.total / state.pageSize));
-};
-
-const onSubtaskPageChange = (rootId: string) => {
   fetchSubtasks(rootId);
 };
 
@@ -746,9 +753,9 @@ onUnmounted(() => {
               </v-btn>
             </div>
 
-            <v-divider v-if="(subtaskMap[root.id]?.total ?? 0) > 0" class="mb-4" />
+            <v-divider v-if="(subtaskMap[root.id]?.items.length ?? 0) > 0" class="mb-4" />
 
-            <template v-if="(subtaskMap[root.id]?.total ?? 0) > 0">
+            <template v-if="(subtaskMap[root.id]?.items.length ?? 0) > 0">
               <div class="d-flex align-center mb-3 ga-3 flex-wrap">
                 <span class="text-subtitle-2 font-weight-bold">子任务</span>
                 <span
@@ -771,15 +778,6 @@ onUnmounted(() => {
                   hide-details
                   style="max-width: 160px;"
                   @update:model-value="applySubtaskFilter(root.id)"
-                />
-                <v-pagination
-                  v-if="subtaskMap[root.id] && subtaskTotalPages(root.id) > 1"
-                  v-model="subtaskMap[root.id].page"
-                  :length="subtaskTotalPages(root.id)"
-                  :total-visible="3"
-                  density="compact"
-                  rounded="circle"
-                  @update:model-value="onSubtaskPageChange(root.id)"
                 />
                 <v-btn
                   v-if="subtaskMap[root.id] && pendingCount(subtaskMap[root.id].items) > 0"
@@ -879,16 +877,15 @@ onUnmounted(() => {
               </v-expansion-panel>
             </v-expansion-panels>
 
-            <div v-if="subtaskTotalPages(root.id) > 1" class="d-flex justify-center mt-3">
               <v-pagination
+                v-if="subtaskMap[root.id] && subtaskMap[root.id].total > subtaskMap[root.id].pageSize"
                 v-model="subtaskMap[root.id].page"
-                :length="subtaskTotalPages(root.id)"
-                :total-visible="5"
-                density="comfortable"
+                :length="Math.ceil(subtaskMap[root.id].total / subtaskMap[root.id].pageSize)"
                 rounded="circle"
-                @update:model-value="onSubtaskPageChange(root.id)"
+                density="compact"
+                class="mt-4"
+                @update:model-value="onSubtaskPageChange(root.id, $event)"
               />
-            </div>
             </template>
 
             <v-empty-state
