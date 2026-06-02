@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import siLog from 'si-log'
@@ -23,17 +23,13 @@ const submit = () => {
     })
         .then(res => {
             l.debug(res)
-            if (res.status === 401) {
-                er.value = true
-            } else if (res.status === 200) {
-                store.user.token = res.data.access_token
-                store.user.username = data.value.username
-                router.push('/')
-            }
+            store.user.token = res.data.access_token
+            store.user.username = data.value.username
+            router.push('/')
             isLoading.value = false
         }).catch(
             err => {
-                l.debug(err.response.response)
+                l.debug(err.response?.data ?? err.message)
                 isLoading.value = false
                 er.value = true
             }
