@@ -106,9 +106,10 @@ const rankingModeItems = [
   { title: 'R18 周榜', value: 'weekly_r18' },
 ];
 
-const illustTypeItems = [
+const illustTypeFilterItems = [
   { title: '插画', value: 'illust' },
   { title: '漫画', value: 'manga' },
+  { title: '动图', value: 'ugoira' },
 ];
 
 const seedMethodItems = [
@@ -176,7 +177,7 @@ const createForm = ref({
   target_date_range:   [] as Date[],
   target_search_prompt: '',
   ranking_mode:       'day',
-  illust_type:        'illust',
+  illust_type_filter: ['illust', 'manga', 'ugoira'] as string[],
   max_pages:           0,
   discover_hops:       0,
   discover_seed_limit: 0,
@@ -489,9 +490,9 @@ const submitCreate = async () => {
     if (createForm.value.crawl_type === 0 && createForm.value.ranking_mode) {
       body.ranking_mode = createForm.value.ranking_mode;
     }
-    // 作品类型（用户爬取）
-    if (createForm.value.crawl_type === 1 && createForm.value.illust_type) {
-      body.illust_type = createForm.value.illust_type;
+    // 图片类型过滤（所有爬取类型）
+    if (createForm.value.illust_type_filter.length > 0 && createForm.value.illust_type_filter.length < illustTypeFilterItems.length) {
+      body.illust_type_filter = createForm.value.illust_type_filter;
     }
     // 页数限制
     if (createForm.value.max_pages > 0) body.max_pages = createForm.value.max_pages;
@@ -950,7 +951,21 @@ onUnmounted(() => {
             <v-text-field v-model="createForm.target_search_prompt" label="搜索关键词（可选）" hide-details="auto" />
 
             <v-select v-if="createForm.crawl_type === 0" v-model="createForm.ranking_mode" :items="rankingModeItems" item-title="title" item-value="value" label="排行榜类型" hide-details="auto" />
-            <v-select v-if="createForm.crawl_type === 1" v-model="createForm.illust_type" :items="illustTypeItems" item-title="title" item-value="value" label="作品类型" hide-details="auto" />
+            <div class="mt-1">
+              <span class="text-caption text-medium-emphasis">图片类型过滤</span>
+              <v-chip-group v-model="createForm.illust_type_filter" multiple column>
+                <v-chip
+                  v-for="item in illustTypeFilterItems"
+                  :key="item.value"
+                  :value="item.value"
+                  filter
+                  variant="outlined"
+                  size="small"
+                >
+                  {{ item.title }}
+                </v-chip>
+              </v-chip-group>
+            </div>
             <v-text-field v-model.number="createForm.max_pages" label="最大页数（0=不限）" type="number" min="0" hide-details="auto" />
 
             <v-divider class="my-1" />
