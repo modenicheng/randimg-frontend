@@ -5,7 +5,6 @@ import { useUserStore } from "../store/store";
 import { mdiFilterOutline } from "@mdi/js";
 import { normalizePrimaryColor } from "../utils/colorNormalization";
 import ImageDetail from '../components/imageDetail.vue';
-import { openExternalUrl } from "../utils/url";
 import type { Author, TagCatalogEntry } from "../types/api";
 const store = useUserStore()
 
@@ -89,6 +88,7 @@ const getImages = async () => {
         }))
         allImages.push(...mapped)
         cols.value = calcImageCol(allImages);
+        updateWaterfallFrameHeight();
         currentOffset.value += limit.value as number;
         if (res.data.length < limit.value) {
           is_empty.value = true;
@@ -106,12 +106,101 @@ const getImages = async () => {
   });
 };
 
-let colWidth = ref(Math.floor(window.innerWidth / 7.5));
+const containerRef = ref<HTMLElement | null>(null);
+const COLUMN_OUTER_GAP = 16;
+const MIN_COLUMN_COUNT = 2;
+const MAX_COLUMN_COUNT = 4;
+const ORIGINAL_COLUMN_WIDTH_DIVISOR = 7.5;
+const MIN_COLUMN_WIDTH_REM = 12;
+const MAX_COLUMN_WIDTH_REM = 20;
+
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+const getRemInPx = () => Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+const getColumnWidthBounds = () => {
+  const rem = getRemInPx();
+  return {
+    min: MIN_COLUMN_WIDTH_REM * rem,
+    max: MAX_COLUMN_WIDTH_REM * rem,
+  };
+};
+const getClampedColumnWidth = () => {
+  const bounds = getColumnWidthBounds();
+  return clamp(
+    Math.floor(window.innerWidth / ORIGINAL_COLUMN_WIDTH_DIVISOR),
+    bounds.min,
+    bounds.max
+  );
+};
+
+let colWidth = ref(getClampedColumnWidth());
+let columnCount = ref(3);
+let waterfallWidth = ref(0);
+let waterfallScale = ref(1);
+let waterfallFrameHeight = ref(0);
+let waterfallOffsetX = ref(0);
+let resizeObserver: ResizeObserver | null = null;
+let drawerObserver: MutationObserver | null = null;
+
+const getNaturalColumnWidth = () => getClampedColumnWidth();
+const getColumnOuterWidth = () => colWidth.value + COLUMN_OUTER_GAP;
+
+const getContainerWidth = () => {
+  const container = containerRef.value;
+  if (!container) return window.innerWidth;
+  const style = getComputedStyle(container);
+  const containerRect = container.getBoundingClientRect();
+  const drawer = document.querySelector('.v-navigation-drawer--active:not(.v-navigation-drawer--rail)');
+  const drawerRect = drawer?.getBoundingClientRect();
+  const drawerOverlap = drawerRect
+    ? Math.max(0, Math.min(containerRect.right, drawerRect.right) - Math.max(containerRect.left, drawerRect.left))
+    : 0;
+
+  waterfallOffsetX.value = drawerOverlap / 2;
+
+  return Math.max(
+    1,
+    container.clientWidth - Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight) - drawerOverlap
+  );
+};
+
+const updateWaterfallFrameHeight = () => {
+  if (!cols.value?.length) {
+    waterfallFrameHeight.value = 0;
+    return;
+  }
+
+  const maxColumnHeight = Math.max(
+    0,
+    ...cols.value.map(col =>
+      col.reduce((height, image) => height + colWidth.value / image.aspect_ratio + COLUMN_OUTER_GAP, 0)
+    )
+  );
+  waterfallFrameHeight.value = Math.ceil(maxColumnHeight * waterfallScale.value);
+};
+
+const updateWaterfallLayout = () => {
+  const width = getContainerWidth();
+  colWidth.value = getNaturalColumnWidth();
+  const nextColumnCount = clamp(
+    Math.floor(width / getColumnOuterWidth()),
+    MIN_COLUMN_COUNT,
+    MAX_COLUMN_COUNT
+  );
+
+  columnCount.value = nextColumnCount;
+  waterfallWidth.value = nextColumnCount * getColumnOuterWidth();
+  waterfallScale.value = Math.min(1, width / waterfallWidth.value);
+  if (allImages.length) {
+    cols.value = calcImageCol(allImages);
+  }
+  updateWaterfallFrameHeight();
+};
+
 const calcImageCol = (images: imageObject[]): imageObject[][] => {
-  const cols: imageObject[][] = [[], [], []];
-  const heights = [0, 0, 0];
+  const cols: imageObject[][] = Array.from({ length: columnCount.value }, () => []);
+  const heights = Array.from({ length: columnCount.value }, () => 0);
   for (const image of images) {
-    const h = 1 / image.aspect_ratio;
+    const h = colWidth.value / image.aspect_ratio + COLUMN_OUTER_GAP;
     const minIndex = heights.indexOf(Math.min(...heights));
     cols[minIndex].push(image);
     heights[minIndex] += h;
@@ -132,11 +221,35 @@ let resizeTimeout: ReturnType<typeof setTimeout> | null = null;
 const onResize = () => {
   if (resizeTimeout) clearTimeout(resizeTimeout);
   resizeTimeout = setTimeout(() => {
-    colWidth.value = Math.floor(window.innerWidth / 7.5);
+    updateWaterfallLayout();
   }, 150);
 };
-onMounted(() => {
-  getImages()
+const observeContainer = () => {
+  if (!containerRef.value || resizeObserver) return;
+  resizeObserver = new ResizeObserver(updateWaterfallLayout);
+  resizeObserver.observe(containerRef.value);
+};
+const observeDrawerState = () => {
+  if (drawerObserver) return;
+  drawerObserver = new MutationObserver((mutations) => {
+    if (mutations.some(mutation => (mutation.target as Element).classList?.contains('v-navigation-drawer'))) {
+      updateWaterfallLayout();
+    }
+  });
+  drawerObserver.observe(document.body, {
+    attributes: true,
+    childList: true,
+    subtree: true,
+    attributeFilter: ['class', 'style'],
+  });
+};
+onMounted(async () => {
+  updateWaterfallLayout()
+  await getImages()
+  await nextTick()
+  observeContainer()
+  observeDrawerState()
+  updateWaterfallLayout()
   getTags()
   Axios.get('/statistic').then(res => {
     totalImages.value = res.data.illust_count
@@ -148,6 +261,8 @@ onMounted(() => {
 onUnmounted(() => {
   removeEventListener("resize", onResize);
   if (resizeTimeout) clearTimeout(resizeTimeout);
+  resizeObserver?.disconnect();
+  drawerObserver?.disconnect();
 });
 
 let overlay = ref(false);
@@ -198,16 +313,19 @@ const filterUpdate = async () => {
     currentOffset.value = 0
   }
   await getImages()
+  updateWaterfallFrameHeight()
   refresh.value = false
   await nextTick(() => {
     refresh.value = true;
     isUpdating.value = false
+    updateWaterfallFrameHeight()
   })
 }
 const clear = () => {
   allImages = []
-  cols.value = [[], [], []];
+  cols.value = Array.from({ length: columnCount.value }, () => []);
   currentOffset.value = 0
+  updateWaterfallFrameHeight()
 }
 let tags = ref<TagCatalogEntry[]>([]);
 let selectionTags = ref<string[]>([]);
@@ -228,8 +346,7 @@ const getTags = () => {
 <template>
   <v-dialog max-width="600">
     <template v-slot:activator="{ props }">
-      <v-fab v-bind="props" :icon='mdiFilterOutline' class='fab'>
-      </v-fab>
+      <v-btn v-bind="props" :icon="mdiFilterOutline" class="fab" elevation="6" size="large"></v-btn>
     </template>
     <template v-slot:default="{ isActive }">
       <v-card class="filter-card">
@@ -272,48 +389,62 @@ const getTags = () => {
     class="overlay align-center" @after-leave="overlayClosed()">
     <ImageDetail :imageId="selectedImageId" />
   </v-overlay>
-  <v-container v-if="cols" class="container">
+  <v-container v-if="cols" ref="containerRef" class="container">
     <v-infinite-scroll v-if="refresh" :onLoad="loadData">
-      <v-row no-gutters>
-        <v-col v-for="colIndex of [0, 1, 2]" :key="colIndex">
-          <template v-for="image of cols[colIndex]" :key="image.id">
-            <v-hover v-slot="{ isHovering, props }">
-              <v-img v-bind="props" class="image" :src="image.src + '/scale_to_1080x1080'" @load="image.loaded = true"
-                :width="colWidth" :height="colWidth / image.aspect_ratio" :style="{
-                  backgroundColor: image.primary_color
-                    ? `rgba(${image.primary_color[0]}, ${image.primary_color[1]}, ${image.primary_color[2]}, 0.5)`
-                    : 'rgba(0,0,0,0)',
-                }" @click="isHoverBtn ? null : showDetail(image.id)">
-                <v-chip v-if='store.user.token' label :color="image.accessible ? 'green' : 'red'" class="admin-chip"
-                  :style="{ opacity: isHovering ? '0' : '1', transition: 'opacity 0.2s' }" size="small">{{
-                    image.accessible ? "可访问" : "不可访问"
-                  }}</v-chip>
-                <template v-slot:placeholder v-if="!image.loaded">
-                  <div class="d-flex align-center justify-center fill-height">
-                    <v-progress-circular color="grey-lighten-4" indeterminate></v-progress-circular>
-                  </div>
-                </template>
-                <v-overlay :model-value="isHovering ?? false" class="img-overlay" :width="colWidth"
-                  :height="colWidth / image.aspect_ratio" contained :content-props="{ class: 'overlay-content' }">
-                  <v-btn v-if='store.user.token' :loading="image.patchLoading"
-                    :color="image.patchLoading ? 'warning' : image.accessible ? 'green' : 'red'" class="admin-btn"
-                    size="x-small" @click="patchImage(image)" @mouseover="isHoverBtn = true"
-                    @mouseleave="isHoverBtn = false">{{
-                      image.accessible ? "可访问" : "不可访问" }}</v-btn>
-                  <div class="inner-container" :width="colWidth" :height="colWidth / image.aspect_ratio"
-                    :style="{ height: `${colWidth / image.aspect_ratio}px` }">
-                    <div class="title" :style="{ width: `${colWidth}px` }">
-                      {{ image.title }}
+      <div class="masonry-frame" :style="{ height: `${waterfallFrameHeight}px` }">
+        <v-row
+          no-gutters
+          class="masonry-row"
+          :style="{
+            width: `${waterfallWidth}px`,
+            transform: `translateX(calc(-50% + ${waterfallOffsetX}px)) scale(${waterfallScale})`,
+          }"
+        >
+          <v-col
+            v-for="(col, colIndex) of cols"
+            :key="colIndex"
+            class="masonry-col"
+            :style="{ flexBasis: `${getColumnOuterWidth()}px`, maxWidth: `${getColumnOuterWidth()}px` }"
+          >
+            <template v-for="image of col" :key="image.id">
+              <v-hover v-slot="{ isHovering, props }">
+                <v-img v-bind="props" class="image" :src="image.src + '/scale_to_1080x1080'" @load="image.loaded = true"
+                  :width="colWidth" :height="colWidth / image.aspect_ratio" :style="{
+                    backgroundColor: image.primary_color
+                      ? `rgba(${image.primary_color[0]}, ${image.primary_color[1]}, ${image.primary_color[2]}, 0.5)`
+                      : 'rgba(0,0,0,0)',
+                  }" @click="isHoverBtn ? null : showDetail(image.id)">
+                  <v-chip v-if='store.user.token' label :color="image.accessible ? 'green' : 'red'" class="admin-chip"
+                    :style="{ opacity: isHovering ? '0' : '1', transition: 'opacity 0.2s' }" size="small">{{
+                      image.accessible ? "可访问" : "不可访问"
+                    }}</v-chip>
+                  <template v-slot:placeholder v-if="!image.loaded">
+                    <div class="d-flex align-center justify-center fill-height">
+                      <v-progress-circular color="grey-lighten-4" indeterminate></v-progress-circular>
                     </div>
-                    <div>{{ image.author.name }}</div>
-                    <div>#{{ image.id }}</div>
-                  </div>
-                </v-overlay>
-              </v-img>
-            </v-hover>
-          </template>
-        </v-col>
-      </v-row>
+                  </template>
+                  <v-overlay :model-value="isHovering ?? false" class="img-overlay" :width="colWidth"
+                    :height="colWidth / image.aspect_ratio" contained :content-props="{ class: 'overlay-content' }">
+                    <v-btn v-if='store.user.token' :loading="image.patchLoading"
+                      :color="image.patchLoading ? 'warning' : image.accessible ? 'green' : 'red'" class="admin-btn"
+                      size="x-small" @click="patchImage(image)" @mouseover="isHoverBtn = true"
+                      @mouseleave="isHoverBtn = false">{{
+                        image.accessible ? "可访问" : "不可访问" }}</v-btn>
+                    <div class="inner-container" :width="colWidth" :height="colWidth / image.aspect_ratio"
+                      :style="{ height: `${colWidth / image.aspect_ratio}px` }">
+                      <div class="title" :style="{ width: `${colWidth}px` }">
+                        {{ image.title }}
+                      </div>
+                      <div>{{ image.author.name }}</div>
+                      <div>#{{ image.id }}</div>
+                    </div>
+                  </v-overlay>
+                </v-img>
+              </v-hover>
+            </template>
+          </v-col>
+        </v-row>
+      </div>
       <template v-slot:empty>
         <div class="text-medium-emphasis text-center pa-4">~ 到底儿了 ~</div>
       </template>
@@ -339,7 +470,30 @@ const getTags = () => {
 }
 
 .container {
-  width: auto;
+  width: 100%;
+  max-width: 1280px;
+  padding-inline: 0.5rem;
+}
+
+.masonry-frame {
+  position: relative;
+  width: 100%;
+  overflow: visible;
+}
+
+.masonry-row {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  justify-content: center;
+  align-items: flex-start;
+  transform-origin: top center;
+}
+
+.masonry-col {
+  flex-grow: 0;
+  flex-shrink: 0;
+  min-width: 0;
 }
 
 .img-overlay {
@@ -498,10 +652,22 @@ const getTags = () => {
   position: fixed;
   bottom: 5rem;
   right: 5rem;
+  z-index: 20;
 }
 
 .filter-card {
   padding: 1rem;
 
+}
+
+@media (max-width: 600px) {
+  .container {
+    padding-inline: 0.25rem;
+  }
+
+  .fab {
+    right: max(1rem, env(safe-area-inset-right));
+    bottom: max(1rem, env(safe-area-inset-bottom));
+  }
 }
 </style>

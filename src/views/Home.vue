@@ -41,7 +41,7 @@ watch(mdAndUp, (isDesktop) => {
 
 </script>
 <template>
-  <v-layout class="rounded rounded-md">
+  <v-layout class="app-layout rounded rounded-md">
     <v-app-bar elevation="1">
       <v-app-bar-nav-icon
         v-if="!mdAndUp"
@@ -74,7 +74,7 @@ watch(mdAndUp, (isDesktop) => {
       </v-list>
     </v-navigation-drawer>
 
-    <v-main id="main" class="d-flex align-center main" style="min-height: 100%; flex-direction: column">
+    <v-main id="main" class="d-flex align-center main">
       <!-- <v-main id="main"> -->
       <router-view></router-view>
     </v-main>
@@ -82,8 +82,19 @@ watch(mdAndUp, (isDesktop) => {
 </template>
 <style scoped lang="scss">
 .main {
-  min-height: 100%;
+  min-height: 100vh;
   width: 100%;
-  position: absolute
+  flex-direction: column;
+}
+
+.app-layout {
+  min-height: 100vh;
+}
+
+:deep(.v-navigation-drawer__scrim) {
+  position: fixed;
+  inset: var(--v-layout-top, 64px) 0 0 0;
+  width: auto;
+  height: auto;
 }
 </style>
