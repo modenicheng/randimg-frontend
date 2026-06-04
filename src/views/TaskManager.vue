@@ -172,6 +172,7 @@ const cleanFlagItems = [
 const scrollContainer = ref<HTMLElement | null>(null);
 /** Polling timer ID — refetched every POLL_INTERVAL ms while any task is active. */
 let pollTimer: ReturnType<typeof setInterval> | null = null;
+let pollRequestLocked = false;
 const POLL_INTERVAL = 5000; // 5 seconds
 
 const createForm = ref({
@@ -600,16 +601,22 @@ const hasActiveTasks = computed(() =>
 
 /** Silent background refresh: root list + all expanded subtask panels. */
 const pollRefresh = async () => {
-  if (!hasActiveTasks.value) {
-    stopPolling();
-    return;
-  }
-  await fetchRoots({ preserveExpanded: true, silent: true });
-  // Also refresh any expanded subtask panels
-  for (const rootId of expandedRoots.value) {
-    if (subtaskMap[rootId]?.loaded) {
-      await fetchSubtasks(rootId, true);
+  if (pollRequestLocked) return;
+  pollRequestLocked = true;
+  try {
+    if (!hasActiveTasks.value) {
+      stopPolling();
+      return;
     }
+    await fetchRoots({ preserveExpanded: true, silent: true });
+    // Also refresh any expanded subtask panels
+    for (const rootId of expandedRoots.value) {
+      if (subtaskMap[rootId]?.loaded) {
+        await fetchSubtasks(rootId, true);
+      }
+    }
+  } finally {
+    pollRequestLocked = false;
   }
 };
 
