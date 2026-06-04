@@ -42,7 +42,7 @@ export interface RandomImageRequest {
 }
 
 export interface Colors {
-    colors: Array<number[]>;
+    colors: Array<{ rgb: number[]; lab: number[] }>;
     [property: string]: any;
 }
 

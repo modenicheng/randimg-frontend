@@ -24,12 +24,16 @@
         height: `${imageDetailData.aspect_ratio < 0.7 ? '4.3rem' : '2rem'}`,
       }" v-if="imageDetailData.colors">
         <div v-for="color of imageDetailData.colors.colors" :key="color">
-          <v-tooltip location="top" class="color-card" :text="`rgb(${color[0]}, ${color[1]}, ${color[2]})`">
+          <v-tooltip location="top" class="color-card">
             <template v-slot:activator="{ props }">
               <v-card hover class="color-card" v-bind="props" :style="{
-                backgroundColor: `rgb(${color[0]}, ${color[1]}, ${color[2]})`,
+                backgroundColor: `rgb(${color.rgb[0]}, ${color.rgb[1]}, ${color.rgb[2]})`,
               }"></v-card>
             </template>
+            <div class="color-tooltip">
+              <div>RGB: {{ color.rgb.join(', ') }}</div>
+              <div>LAB: {{ color.lab.map((v: number) => v.toFixed(1)).join(', ') }}</div>
+            </div>
           </v-tooltip>
         </div>
       </div>
@@ -167,6 +171,12 @@ watch(() => props.imageId, () => {
     .color-card {
       width: 100%;
       height: 100%;
+    }
+
+    .color-tooltip {
+      font-size: 0.75rem;
+      line-height: 1.4;
+      white-space: nowrap;
     }
 
     margin: 0.6rem 0 0 0;

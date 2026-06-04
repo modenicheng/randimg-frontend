@@ -4,6 +4,7 @@ import { onMounted, onUnmounted, ref, nextTick } from 'vue';
 import { useUserStore } from "../store/store";
 import { mdiFilterOutline } from "@mdi/js";
 import { normalizePrimaryColor } from "../utils/colorNormalization";
+import type { PrimaryColor } from "../utils/colorNormalization";
 import ImageDetail from '../components/imageDetail.vue';
 import type { Author, TagCatalogEntry } from "../types/api";
 const store = useUserStore()
@@ -21,7 +22,7 @@ interface imageObject {
   source_id: number;
   loaded: boolean | undefined;
   aspect_ratio: number;
-  primary_color: [number, number, number] | null;
+  primary_color: PrimaryColor | null;
   accessible: boolean | undefined;
   patchLoading: boolean | undefined;
 }
@@ -411,7 +412,7 @@ const getTags = () => {
                 <v-img v-bind="props" class="image" :src="image.src + '/scale_to_1080x1080'" @load="image.loaded = true"
                   :width="colWidth" :height="colWidth / image.aspect_ratio" :style="{
                     backgroundColor: image.primary_color
-                      ? `rgba(${image.primary_color[0]}, ${image.primary_color[1]}, ${image.primary_color[2]}, 0.5)`
+                      ? `rgba(${image.primary_color.rgb[0]}, ${image.primary_color.rgb[1]}, ${image.primary_color.rgb[2]}, 0.5)`
                       : 'rgba(0,0,0,0)',
                   }" @click="isHoverBtn ? null : showDetail(image.id)">
                   <v-chip v-if='store.user.token' label :color="image.accessible ? 'green' : 'red'" class="admin-chip"
@@ -436,7 +437,20 @@ const getTags = () => {
                         {{ image.title }}
                       </div>
                       <div>{{ image.author.name }}</div>
-                      <div>#{{ image.id }}</div>
+                      <div class="d-flex align-center ga-1">
+                        <span>#{{ image.id }}</span>
+                        <v-tooltip v-if="image.primary_color" location="top">
+                          <template v-slot:activator="{ props: tipProps }">
+                            <span v-bind="tipProps" class="color-swatch" :style="{
+                              backgroundColor: `rgb(${image.primary_color.rgb[0]}, ${image.primary_color.rgb[1]}, ${image.primary_color.rgb[2]})`,
+                            }"></span>
+                          </template>
+                          <div class="color-tooltip">
+                            <div>RGB: {{ image.primary_color.rgb.join(', ') }}</div>
+                            <div>LAB: {{ image.primary_color.lab.map(v => v.toFixed(1)).join(', ') }}</div>
+                          </div>
+                        </v-tooltip>
+                      </div>
                     </div>
                   </v-overlay>
                 </v-img>
@@ -547,6 +561,22 @@ const getTags = () => {
     background: linear-gradient(to top,
         rgba(var(--v-theme-on-surface), 0.8),
         rgba(var(--v-theme-on-surface), 0));
+  }
+
+  .color-swatch {
+    display: inline-block;
+    width: 0.85rem;
+    height: 0.85rem;
+    border-radius: 0.15rem;
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    vertical-align: middle;
+    flex-shrink: 0;
+  }
+
+  .color-tooltip {
+    font-size: 0.75rem;
+    line-height: 1.4;
+    white-space: nowrap;
   }
 }
 
