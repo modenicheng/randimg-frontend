@@ -7,14 +7,17 @@ import { formatDate } from '../utils/formatDate';
 /** Core task data returned by both /tasks/roots and /tasks/{id}/tree?flatten=true. */
 interface Task {
   id: string;
-  jobType: string;        // camelCase from backend
+  taskType: string;       // snake_case from backend: task_type
   status: string;
-  attempts: number;
-  maxAttempts: number;
-  runAt: string | null;
-  doneAt: string | null;
-  lastResult: string | null;
-  priority: number;
+  rawStatus?: string;     // raw_status before derived-status rollup
+  retryCount: number;     // retry_count
+  createdAt: string;      // created_at
+  updatedAt?: string;     // updated_at
+  completedAt: string | null;  // completed_at
+  errorMessage: string | null; // error_message
+  rootId?: string | null;      // root_id
+  crawlerId?: number | null;   // crawler_id
+  imageId?: number | null;     // image_id
   payload?: any;
   /** Direct parent job ID (only present in flattened tree view). */
   parent_job_id?: string;
@@ -179,6 +182,7 @@ const createForm = ref({
   ranking_mode:       'day',
   illust_type_filter: ['illust'] as string[],
   max_pages:           0,
+  disable_discover:    false,
   discover_hops:       0,
   discover_seed_limit: 0,
   discover_seed_method: 'popularity',
@@ -197,18 +201,21 @@ const sortedRoots = computed(() =>
 /** Derived: root IDs whose panels should be shown as expanded (for :model-value binding). */
 const expandedIds = computed(() => [...expandedRoots.value]);
 
-/** Parse a backend task object (camelCase) into our Task interface. */
+/** Parse a backend task object (snake_case) into our Task interface. */
 const parseTask = (raw: any): Task => ({
-  id:         raw.id,
-  jobType:    raw.jobType ?? raw.job_type ?? '',
-  status:     raw.status,
-  attempts:   raw.attempts,
-  maxAttempts: raw.maxAttempts ?? raw.max_attempts ?? 0,
-  runAt:      raw.runAt ?? raw.run_at ?? null,
-  doneAt:     raw.doneAt ?? raw.done_at ?? null,
-  lastResult: raw.lastResult ?? raw.last_result ?? null,
-  priority:   raw.priority ?? 0,
-  payload:    raw.payload,
+  id:           raw.id,
+  taskType:     raw.task_type ?? '',
+  status:       raw.status,
+  rawStatus:    raw.raw_status,
+  retryCount:   raw.retry_count ?? 0,
+  createdAt:    raw.created_at ?? '',
+  updatedAt:    raw.updated_at,
+  completedAt:  raw.completed_at ?? null,
+  errorMessage: raw.error_message ?? null,
+  rootId:       raw.root_id ?? null,
+  crawlerId:    raw.crawler_id ?? null,
+  imageId:      raw.image_id ?? null,
+  payload:      raw.payload,
   parent_job_id: raw.parent_job_id,
   root_job_id:   raw.root_job_id,
 });
@@ -280,7 +287,7 @@ const fetchSubtasks = async (rootId: string, silent = false) => {
       state.total = res.data.total ?? 0;
       // Apply client-side type filter if set
       if (state.filterType) {
-        tasks = tasks.filter((t: Task) => t.jobType === state.filterType);
+        tasks = tasks.filter((t: Task) => t.taskType === state.filterType);
       }
       state.items = tasks;
       state.loaded = true;
@@ -497,10 +504,14 @@ const submitCreate = async () => {
     // 页数限制
     if (createForm.value.max_pages > 0) body.max_pages = createForm.value.max_pages;
     // Discover 参数
-    if (createForm.value.discover_hops > 0) body.discover_hops = createForm.value.discover_hops;
-    if (createForm.value.discover_seed_limit > 0) body.discover_seed_limit = createForm.value.discover_seed_limit;
-    if (createForm.value.discover_seed_method && createForm.value.discover_seed_method !== 'popularity') {
-      body.discover_seed_method = createForm.value.discover_seed_method;
+    if (createForm.value.disable_discover) {
+      body.disable_discover = true;
+    } else {
+      if (createForm.value.discover_hops > 0) body.discover_hops = createForm.value.discover_hops;
+      if (createForm.value.discover_seed_limit > 0) body.discover_seed_limit = createForm.value.discover_seed_limit;
+      if (createForm.value.discover_seed_method && createForm.value.discover_seed_method !== 'popularity') {
+        body.discover_seed_method = createForm.value.discover_seed_method;
+      }
     }
 
     await Axios.post('/crawler', body);
@@ -525,11 +536,12 @@ const stripJobTypePrefix = (jobType: string): string =>
   jobType.startsWith(JOB_TYPE_PREFIX) ? jobType.slice(JOB_TYPE_PREFIX.length) : jobType;
 
 const taskTitle = (t: Task): string => {
-  const label = jobLabel[t.jobType] ?? stripJobTypePrefix(t.jobType);
+  const label = jobLabel[t.taskType] ?? stripJobTypePrefix(t.taskType);
   let hint = '';
   if (t.payload?.target_user_id)                     hint = `user: ${t.payload.target_user_id}`;
   else if (t.payload?.target_start_date)             hint = `${t.payload.target_start_date} ~ ${t.payload.target_end_date ?? ''}`;
-  else if (t.payload?.image_id)                      hint = `image #${t.payload.image_id}`;
+  else if (t.imageId)                                hint = `image #${t.imageId}`;
+  else if (t.crawlerId)                              hint = `crawler #${t.crawlerId}`;
   else if (t.payload?.credential_id)                 hint = `credential #${t.payload.credential_id}`;
   return label + (hint ? ': ' + hint : '');
 };
@@ -674,7 +686,7 @@ onUnmounted(() => {
                 {{ taskTitle(root) }}
               </span>
               <span class="text-caption text-medium-emphasis ml-3 flex-shrink-0">
-                {{ formatDate(root.runAt) }}
+                {{ formatDate(root.createdAt) }}
               </span>
             </div>
           </v-expansion-panel-title>
@@ -685,28 +697,28 @@ onUnmounted(() => {
             <div class="root-info-grid mb-4">
               <div class="info-item">
                 <span class="text-caption text-medium-emphasis font-weight-medium text-uppercase">类型</span>
-                <span>{{ jobLabel[root.jobType] ?? root.jobType }}</span>
+                <span>{{ jobLabel[root.taskType] ?? root.taskType }}</span>
               </div>
               <div class="info-item">
-                <span class="text-caption text-medium-emphasis font-weight-medium text-uppercase">尝试次数</span>
-                <span>{{ root.attempts }} / {{ root.maxAttempts }}</span>
+                <span class="text-caption text-medium-emphasis font-weight-medium text-uppercase">重试次数</span>
+                <span>{{ root.retryCount }}</span>
               </div>
               <div class="info-item">
                 <span class="text-caption text-medium-emphasis font-weight-medium text-uppercase">创建时间</span>
-                <span>{{ formatDate(root.runAt) }}</span>
+                <span>{{ formatDate(root.createdAt) }}</span>
               </div>
-              <div class="info-item" v-if="root.doneAt">
+              <div class="info-item" v-if="root.completedAt">
                 <span class="text-caption text-medium-emphasis font-weight-medium text-uppercase">完成时间</span>
-                <span>{{ formatDate(root.doneAt) }}</span>
+                <span>{{ formatDate(root.completedAt) }}</span>
               </div>
-              <div class="info-item" v-if="root.priority">
-                <span class="text-caption text-medium-emphasis font-weight-medium text-uppercase">优先级</span>
-                <span>{{ root.priority }}</span>
+              <div class="info-item" v-if="root.rawStatus && root.rawStatus !== root.status">
+                <span class="text-caption text-medium-emphasis font-weight-medium text-uppercase">原始状态</span>
+                <span>{{ statusLabel[root.rawStatus] ?? root.rawStatus }}</span>
               </div>
             </div>
 
             <!-- Payload / last_result -->
-            <v-expansion-panels v-if="root.payload || root.lastResult" variant="accordion" class="subtask-panels mb-4">
+            <v-expansion-panels v-if="root.payload || root.errorMessage" variant="accordion" class="subtask-panels mb-4">
               <v-expansion-panel v-if="root.payload">
                 <v-expansion-panel-title class="py-2 px-3" hide-actions>
                   <template #default="{ expanded }">
@@ -725,7 +737,7 @@ onUnmounted(() => {
                 </v-expansion-panel-text>
               </v-expansion-panel>
 
-              <v-expansion-panel v-if="root.lastResult">
+              <v-expansion-panel v-if="root.errorMessage">
                 <v-expansion-panel-title class="py-2 px-3" hide-actions>
                   <template #default="{ expanded }">
                     <div class="d-flex align-center w-100" style="min-width: 0;">
@@ -734,12 +746,12 @@ onUnmounted(() => {
                         :icon="expanded ? mdiChevronDown : mdiChevronRight"
                         size="small"
                       />
-                      <span class="text-body-2">执行结果</span>
+                      <span class="text-body-2">错误信息</span>
                     </div>
                   </template>
                 </v-expansion-panel-title>
                 <v-expansion-panel-text class="pt-0">
-                  <pre class="json-block" style="max-height: 120px; font-size: 0.75rem;">{{ formatJson(root.lastResult) }}</pre>
+                  <pre class="json-block" style="max-height: 120px; font-size: 0.75rem;">{{ formatJson(root.errorMessage) }}</pre>
                 </v-expansion-panel-text>
               </v-expansion-panel>
             </v-expansion-panels>
@@ -828,7 +840,7 @@ onUnmounted(() => {
                       {{ taskTitle(child) }}
                     </span>
                     <span class="text-caption text-medium-emphasis ml-2 flex-shrink-0">
-                      {{ formatDate(child.runAt) }}
+                      {{ formatDate(child.createdAt) }}
                     </span>
                   </div>
                   </template>
@@ -838,19 +850,19 @@ onUnmounted(() => {
                   <div class="root-info-grid mb-2 mt-2">
                     <div class="info-item">
                       <span class="text-caption text-medium-emphasis font-weight-medium">类型</span>
-                      <span class="text-body-2">{{ jobLabel[child.jobType] ?? child.jobType }}</span>
+                      <span class="text-body-2">{{ jobLabel[child.taskType] ?? child.taskType }}</span>
                     </div>
                     <div class="info-item">
                       <span class="text-caption text-medium-emphasis font-weight-medium">重试次数</span>
-                      <span class="text-body-2">{{ child.attempts }} / {{ child.maxAttempts }}</span>
+                      <span class="text-body-2">{{ child.retryCount }}</span>
                     </div>
                     <div class="info-item">
                       <span class="text-caption text-medium-emphasis font-weight-medium">创建时间</span>
-                      <span class="text-body-2">{{ formatDate(child.runAt) }}</span>
+                      <span class="text-body-2">{{ formatDate(child.createdAt) }}</span>
                     </div>
-                    <div class="info-item" v-if="child.doneAt">
+                    <div class="info-item" v-if="child.completedAt">
                       <span class="text-caption text-medium-emphasis font-weight-medium">完成时间</span>
-                      <span class="text-body-2">{{ formatDate(child.doneAt) }}</span>
+                      <span class="text-body-2">{{ formatDate(child.completedAt) }}</span>
                     </div>
                   </div>
 
@@ -859,9 +871,9 @@ onUnmounted(() => {
                     <pre class="json-block" style="max-height: 120px; font-size: 0.75rem;">{{ formatJson(child.payload) }}</pre>
                   </div>
 
-                  <div v-if="child.lastResult" class="mb-2">
-                    <span class="text-caption text-medium-emphasis font-weight-medium d-block mb-1">结果</span>
-                    <pre class="json-block" style="max-height: 120px; font-size: 0.75rem;">{{ formatJson(child.lastResult) }}</pre>
+                  <div v-if="child.errorMessage" class="mb-2">
+                    <span class="text-caption text-medium-emphasis font-weight-medium d-block mb-1">错误信息</span>
+                    <pre class="json-block" style="max-height: 120px; font-size: 0.75rem;">{{ formatJson(child.errorMessage) }}</pre>
                   </div>
 
                   <v-divider class="my-2" />
@@ -969,10 +981,23 @@ onUnmounted(() => {
             <v-text-field v-model.number="createForm.max_pages" label="最大页数（0=不限）" type="number" min="0" hide-details="auto" />
 
             <v-divider class="my-1" />
-            <span class="text-caption text-medium-emphasis">Discover 参数</span>
-            <v-text-field v-model.number="createForm.discover_hops" label="Discover 跳数（0=使用默认值）" type="number" min="0" hide-details="auto" />
-            <v-text-field v-model.number="createForm.discover_seed_limit" label="Discover 种子数（0=使用默认值）" type="number" min="0" hide-details="auto" />
-            <v-select v-model="createForm.discover_seed_method" :items="seedMethodItems" item-title="title" item-value="value" label="Discover 种子选择策略" hide-details="auto" />
+            <div class="d-flex align-center">
+              <span class="text-caption text-medium-emphasis">Discover 参数</span>
+              <v-spacer />
+              <v-switch
+                v-model="createForm.disable_discover"
+                label="禁用 Discover"
+                color="warning"
+                density="compact"
+                hide-details
+                class="ml-2"
+              />
+            </div>
+            <template v-if="!createForm.disable_discover">
+              <v-text-field v-model.number="createForm.discover_hops" label="Discover 跳数（0=使用默认值）" type="number" min="0" hide-details="auto" />
+              <v-text-field v-model.number="createForm.discover_seed_limit" label="Discover 种子数（0=使用默认值）" type="number" min="0" hide-details="auto" />
+              <v-select v-model="createForm.discover_seed_method" :items="seedMethodItems" item-title="title" item-value="value" label="Discover 种子选择策略" hide-details="auto" />
+            </template>
           </v-form>
         </v-card-text>
         <v-card-actions>
