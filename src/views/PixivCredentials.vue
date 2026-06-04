@@ -2,6 +2,7 @@
 import Axios from '../axios/axios';
 import { ref, onMounted } from 'vue';
 import { formatDate } from '../utils/formatDate';
+import { mdiDelete, mdiEye, mdiPencil, mdiRefresh } from '@mdi/js';
 
 interface PixivCredential {
   id: number;
@@ -196,11 +197,33 @@ onMounted(fetchCredentials);
         {{ formatDate(item.created_at) }}
       </template>
       <template v-slot:item.actions="{ item }">
-        <v-btn size="small" variant="text" color="primary" @click="openEdit(item)">编辑</v-btn>
-        <v-btn size="small" variant="text" color="info" @click="viewToken(item.id)">查看Token</v-btn>
-        <v-btn size="small" variant="text" color="warning" :loading="refreshingId === item.id"
-          @click="refreshToken(item.id)">刷新</v-btn>
-        <v-btn size="small" variant="text" color="error" @click="openDelete(item.id)">删除</v-btn>
+        <div class="d-flex align-center ga-1 py-1">
+          <v-tooltip text="编辑" location="top">
+            <template v-slot:activator="{ props }">
+              <v-btn v-bind="props" :icon="mdiPencil" size="small" density="comfortable" variant="text"
+                color="primary" aria-label="编辑" @click="openEdit(item)" />
+            </template>
+          </v-tooltip>
+          <v-tooltip text="查看Token" location="top">
+            <template v-slot:activator="{ props }">
+              <v-btn v-bind="props" :icon="mdiEye" size="small" density="comfortable" variant="text" color="info"
+                aria-label="查看Token" @click="viewToken(item.id)" />
+            </template>
+          </v-tooltip>
+          <v-tooltip text="刷新" location="top">
+            <template v-slot:activator="{ props }">
+              <v-btn v-bind="props" :icon="mdiRefresh" size="small" density="comfortable" variant="text"
+                color="warning" :loading="refreshingId === item.id" aria-label="刷新"
+                @click="refreshToken(item.id)" />
+            </template>
+          </v-tooltip>
+          <v-tooltip text="删除" location="top">
+            <template v-slot:activator="{ props }">
+              <v-btn v-bind="props" :icon="mdiDelete" size="small" density="comfortable" variant="text" color="error"
+                aria-label="删除" @click="openDelete(item.id)" />
+            </template>
+          </v-tooltip>
+        </div>
       </template>
     </v-data-table>
 
