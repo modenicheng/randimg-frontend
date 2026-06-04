@@ -186,7 +186,33 @@ const createForm = ref({
   discover_hops:       0,
   discover_seed_limit: 0,
   discover_seed_method: 'popularity',
+  credential_ids:      [] as number[],
 });
+
+/** Pixiv credentials for the credential selector. */
+interface PixivCred {
+  id: number;
+  pixiv_user_id: string;
+  status: number;
+  note: string | null;
+}
+const credentials = ref<PixivCred[]>([]);
+
+const fetchCredentials = async () => {
+  try {
+    const res = await Axios.get('/pixiv-credential');
+    if (res.status === 200) credentials.value = res.data;
+  } catch { /* silent */ }
+};
+
+/** Active credentials for the selector. */
+const activeCredentials = computed(() =>
+  credentials.value.filter(c => c.status === 0)
+);
+
+/** Credential selector item title. */
+const credTitle = (c: PixivCred) =>
+  `#${c.id} — ${c.pixiv_user_id}${c.note ? ' (' + c.note + ')' : ''}`;
 
 const snackbar = ref({ show: false, text: '', color: 'error' });
 
@@ -480,6 +506,11 @@ const fmtDate = (d: Date) => d.toISOString().slice(0, 10);
 const submitCreate = async () => {
   const result = await createFormRef.value?.validate();
   if (!result?.valid) return;
+  // Bookmarks crawl (crawl_type=2) requires credential_ids
+  if (createForm.value.crawl_type === 2 && createForm.value.credential_ids.length === 0) {
+    snackbar.value = { show: true, text: '收藏夹爬取必须选择至少一个 Pixiv 凭证', color: 'error' };
+    return;
+  }
   creating.value = true;
   try {
     const body: any = {
@@ -512,6 +543,10 @@ const submitCreate = async () => {
       if (createForm.value.discover_seed_method && createForm.value.discover_seed_method !== 'popularity') {
         body.discover_seed_method = createForm.value.discover_seed_method;
       }
+    }
+    // 凭证选择
+    if (createForm.value.credential_ids.length > 0) {
+      body.credential_ids = createForm.value.credential_ids;
     }
 
     await Axios.post('/crawler', body);
@@ -598,6 +633,7 @@ watch(hasActiveTasks, (active) => {
 
 onMounted(() => {
   fetchRoots();
+  fetchCredentials();
 });
 
 onUnmounted(() => {
@@ -960,7 +996,23 @@ onUnmounted(() => {
               :rules="requiredRule"
               hide-details="auto"
             />
-            <v-text-field v-model="createForm.target_search_prompt" label="搜索关键词（可选）" hide-details="auto" />
+            <v-text-field v-model="createForm.target_search_prompt" :label="createForm.crawl_type === 2 ? '标签过滤（可选）' : '搜索关键词（可选）'" hide-details="auto" />
+
+            <!-- 凭证选择：收藏夹爬取必填，其他类型可选 -->
+            <v-select
+              v-model="createForm.credential_ids"
+              :items="activeCredentials"
+              :item-title="credTitle"
+              item-value="id"
+              label="Pixiv 凭证"
+              :required="createForm.crawl_type === 2"
+              multiple
+              chips
+              closable-chips
+              hide-details="auto"
+              :hint="createForm.crawl_type === 2 ? '收藏夹爬取必须指定凭证' : '留空则自动选择'"
+              persistent-hint
+            />
 
             <v-select v-if="createForm.crawl_type === 0" v-model="createForm.ranking_mode" :items="rankingModeItems" item-title="title" item-value="value" label="排行榜类型" hide-details="auto" />
             <div class="mt-1">
