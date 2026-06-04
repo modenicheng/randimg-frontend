@@ -40,8 +40,6 @@ interface requestParams {
 
 let is_empty = ref(false);
 
-let refresh = ref(true)
-
 let params = ref<requestParams>({
   ratioRange: [0, 10],
   accessible: true,
@@ -107,7 +105,9 @@ const getImages = async () => {
   });
 };
 
-const containerRef = ref<HTMLElement | null>(null);
+type ElementRef = HTMLElement | { $el?: HTMLElement } | null;
+
+const containerRef = ref<ElementRef>(null);
 const COLUMN_OUTER_GAP = 16;
 const MIN_COLUMN_COUNT = 2;
 const MAX_COLUMN_COUNT = 4;
@@ -116,6 +116,11 @@ const MIN_COLUMN_WIDTH_REM = 12;
 const MAX_COLUMN_WIDTH_REM = 20;
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+const getElementFromRef = (target: ElementRef) => {
+  if (target instanceof HTMLElement) return target;
+  if (target?.$el instanceof HTMLElement) return target.$el;
+  return null;
+};
 const getRemInPx = () => Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
 const getColumnWidthBounds = () => {
   const rem = getRemInPx();
@@ -139,14 +144,18 @@ let waterfallWidth = ref(0);
 let waterfallScale = ref(1);
 let waterfallFrameHeight = ref(0);
 let waterfallOffsetX = ref(0);
+const loadMoreRef = ref<HTMLElement | null>(null);
+const isLoadingImages = ref(false);
 let resizeObserver: ResizeObserver | null = null;
 let drawerObserver: MutationObserver | null = null;
+let infiniteObserver: IntersectionObserver | null = null;
+let scrollCheckFrame: number | null = null;
 
 const getNaturalColumnWidth = () => getClampedColumnWidth();
 const getColumnOuterWidth = () => colWidth.value + COLUMN_OUTER_GAP;
 
 const getContainerWidth = () => {
-  const container = containerRef.value;
+  const container = getElementFromRef(containerRef.value);
   if (!container) return window.innerWidth;
   const style = getComputedStyle(container);
   const containerRect = container.getBoundingClientRect();
@@ -183,7 +192,7 @@ const updateWaterfallLayout = () => {
   const width = getContainerWidth();
   colWidth.value = getNaturalColumnWidth();
   const nextColumnCount = clamp(
-    Math.floor(width / getColumnOuterWidth()),
+    Math.round(width / getColumnOuterWidth()),
     MIN_COLUMN_COUNT,
     MAX_COLUMN_COUNT
   );
@@ -210,13 +219,51 @@ const calcImageCol = (images: imageObject[]): imageObject[][] => {
 };
 let cols = ref<imageObject[][]>();
 let currentOffset = ref<number>(0);
-const loadData = async ({ done }: any) => {
+
+const isLoadMoreVisible = () => {
+  const sentinel = loadMoreRef.value;
+  if (!sentinel) return false;
+
+  const rect = sentinel.getBoundingClientRect();
+  return rect.top <= window.innerHeight + 400 && rect.bottom >= -400;
+};
+
+const ensureLoadMore = async () => {
+  if (isLoadingImages.value || is_empty.value) return;
+
+  isLoadingImages.value = true;
   await getImages();
-  if (is_empty.value) {
-    done("empty");
-  } else {
-    done("ok");
-  }
+  await nextTick();
+  updateWaterfallFrameHeight();
+  isLoadingImages.value = false;
+
+  requestAnimationFrame(() => {
+    if (!is_empty.value && isLoadMoreVisible()) {
+      ensureLoadMore();
+    }
+  });
+};
+
+const observeLoadMore = () => {
+  if (!loadMoreRef.value || infiniteObserver) return;
+
+  infiniteObserver = new IntersectionObserver((entries) => {
+    if (entries.some(entry => entry.isIntersecting)) {
+      ensureLoadMore();
+    }
+  }, { rootMargin: '400px 0px' });
+  infiniteObserver.observe(loadMoreRef.value);
+};
+
+const checkLoadMoreOnScroll = () => {
+  if (scrollCheckFrame !== null) return;
+
+  scrollCheckFrame = requestAnimationFrame(() => {
+    scrollCheckFrame = null;
+    if (isLoadMoreVisible()) {
+      ensureLoadMore();
+    }
+  });
 };
 let resizeTimeout: ReturnType<typeof setTimeout> | null = null;
 const onResize = () => {
@@ -226,9 +273,11 @@ const onResize = () => {
   }, 150);
 };
 const observeContainer = () => {
-  if (!containerRef.value || resizeObserver) return;
+  const container = getElementFromRef(containerRef.value);
+  if (!container || resizeObserver) return;
+
   resizeObserver = new ResizeObserver(updateWaterfallLayout);
-  resizeObserver.observe(containerRef.value);
+  resizeObserver.observe(container);
 };
 const observeDrawerState = () => {
   if (drawerObserver) return;
@@ -246,10 +295,11 @@ const observeDrawerState = () => {
 };
 onMounted(async () => {
   updateWaterfallLayout()
-  await getImages()
+  await ensureLoadMore()
   await nextTick()
   observeContainer()
   observeDrawerState()
+  observeLoadMore()
   updateWaterfallLayout()
   getTags()
   Axios.get('/statistic').then(res => {
@@ -258,12 +308,16 @@ onMounted(async () => {
     console.error('Failed to load statistics:', e)
   })
   addEventListener("resize", onResize);
+  addEventListener("scroll", checkLoadMoreOnScroll, { passive: true });
 });
 onUnmounted(() => {
   removeEventListener("resize", onResize);
+  removeEventListener("scroll", checkLoadMoreOnScroll);
   if (resizeTimeout) clearTimeout(resizeTimeout);
+  if (scrollCheckFrame !== null) cancelAnimationFrame(scrollCheckFrame);
   resizeObserver?.disconnect();
   drawerObserver?.disconnect();
+  infiniteObserver?.disconnect();
 });
 
 let overlay = ref(false);
@@ -313,14 +367,11 @@ const filterUpdate = async () => {
   } else {
     currentOffset.value = 0
   }
-  await getImages()
+  await ensureLoadMore()
   updateWaterfallFrameHeight()
-  refresh.value = false
-  await nextTick(() => {
-    refresh.value = true;
-    isUpdating.value = false
-    updateWaterfallFrameHeight()
-  })
+  await nextTick()
+  isUpdating.value = false
+  updateWaterfallFrameHeight()
 }
 const clear = () => {
   allImages = []
@@ -386,83 +437,82 @@ const getTags = () => {
     </template>
   </v-dialog>
 
-  <v-overlay scroll-strategy="none" v-if="selectedImageId" z-index="10000" v-model="overlay"
+  <v-overlay scroll-strategy="block" v-if="selectedImageId" z-index="10000" v-model="overlay"
     class="overlay align-center" @after-leave="overlayClosed()">
-    <ImageDetail :imageId="selectedImageId" />
+    <ImageDetail :imageId="selectedImageId" @close="overlay = false" />
   </v-overlay>
   <v-container v-if="cols" ref="containerRef" class="container">
-    <v-infinite-scroll v-if="refresh" :onLoad="loadData">
-      <div class="masonry-frame" :style="{ height: `${waterfallFrameHeight}px` }">
-        <v-row
-          no-gutters
-          class="masonry-row"
-          :style="{
-            width: `${waterfallWidth}px`,
-            transform: `translateX(calc(-50% + ${waterfallOffsetX}px)) scale(${waterfallScale})`,
-          }"
+    <div class="masonry-frame" :style="{ height: `${waterfallFrameHeight}px` }">
+      <v-row
+        no-gutters
+        class="masonry-row"
+        :style="{
+          width: `${waterfallWidth}px`,
+          transform: `translateX(calc(-50% + ${waterfallOffsetX}px)) scale(${waterfallScale})`,
+        }"
+      >
+        <v-col
+          v-for="(col, colIndex) of cols"
+          :key="colIndex"
+          class="masonry-col"
+          :style="{ flexBasis: `${getColumnOuterWidth()}px`, maxWidth: `${getColumnOuterWidth()}px` }"
         >
-          <v-col
-            v-for="(col, colIndex) of cols"
-            :key="colIndex"
-            class="masonry-col"
-            :style="{ flexBasis: `${getColumnOuterWidth()}px`, maxWidth: `${getColumnOuterWidth()}px` }"
-          >
-            <template v-for="image of col" :key="image.id">
-              <v-hover v-slot="{ isHovering, props }">
-                <v-img v-bind="props" class="image" :src="image.src + '/scale_to_1080x1080'" @load="image.loaded = true"
-                  :width="colWidth" :height="colWidth / image.aspect_ratio" :style="{
-                    backgroundColor: image.primary_color
-                      ? `rgba(${image.primary_color.rgb[0]}, ${image.primary_color.rgb[1]}, ${image.primary_color.rgb[2]}, 0.5)`
-                      : 'rgba(0,0,0,0)',
-                  }" @click="isHoverBtn ? null : showDetail(image.id)">
-                  <v-chip v-if='store.user.token' label :color="image.accessible ? 'green' : 'red'" class="admin-chip"
-                    :style="{ opacity: isHovering ? '0' : '1', transition: 'opacity 0.2s' }" size="small">{{
-                      image.accessible ? "可访问" : "不可访问"
-                    }}</v-chip>
-                  <template v-slot:placeholder v-if="!image.loaded">
-                    <div class="d-flex align-center justify-center fill-height">
-                      <v-progress-circular color="grey-lighten-4" indeterminate></v-progress-circular>
+          <template v-for="image of col" :key="image.id">
+            <v-hover v-slot="{ isHovering, props }">
+              <v-img v-bind="props" class="image" :src="image.src + '/scale_to_1080x1080'" @load="image.loaded = true"
+                :width="colWidth" :height="colWidth / image.aspect_ratio" :style="{
+                  backgroundColor: image.primary_color
+                    ? `rgba(${image.primary_color.rgb[0]}, ${image.primary_color.rgb[1]}, ${image.primary_color.rgb[2]}, 0.5)`
+                    : 'rgba(0,0,0,0)',
+                }" @click="isHoverBtn ? null : showDetail(image.id)">
+                <v-chip v-if='store.user.token' label :color="image.accessible ? 'green' : 'red'" class="admin-chip"
+                  :style="{ opacity: isHovering ? '0' : '1', transition: 'opacity 0.2s' }" size="small">{{
+                    image.accessible ? "可访问" : "不可访问"
+                  }}</v-chip>
+                <template v-slot:placeholder v-if="!image.loaded">
+                  <div class="d-flex align-center justify-center fill-height">
+                    <v-progress-circular color="grey-lighten-4" indeterminate></v-progress-circular>
+                  </div>
+                </template>
+                <v-overlay :model-value="isHovering ?? false" class="img-overlay" :width="colWidth"
+                  :height="colWidth / image.aspect_ratio" contained :content-props="{ class: 'overlay-content' }">
+                  <v-btn v-if='store.user.token' :loading="image.patchLoading"
+                    :color="image.patchLoading ? 'warning' : image.accessible ? 'green' : 'red'" class="admin-btn"
+                    size="x-small" @click="patchImage(image)" @mouseover="isHoverBtn = true"
+                    @mouseleave="isHoverBtn = false">{{
+                      image.accessible ? "可访问" : "不可访问" }}</v-btn>
+                  <div class="inner-container" :width="colWidth" :height="colWidth / image.aspect_ratio"
+                    :style="{ height: `${colWidth / image.aspect_ratio}px` }">
+                    <div class="title" :style="{ width: `${colWidth}px` }">
+                      {{ image.title }}
                     </div>
-                  </template>
-                  <v-overlay :model-value="isHovering ?? false" class="img-overlay" :width="colWidth"
-                    :height="colWidth / image.aspect_ratio" contained :content-props="{ class: 'overlay-content' }">
-                    <v-btn v-if='store.user.token' :loading="image.patchLoading"
-                      :color="image.patchLoading ? 'warning' : image.accessible ? 'green' : 'red'" class="admin-btn"
-                      size="x-small" @click="patchImage(image)" @mouseover="isHoverBtn = true"
-                      @mouseleave="isHoverBtn = false">{{
-                        image.accessible ? "可访问" : "不可访问" }}</v-btn>
-                    <div class="inner-container" :width="colWidth" :height="colWidth / image.aspect_ratio"
-                      :style="{ height: `${colWidth / image.aspect_ratio}px` }">
-                      <div class="title" :style="{ width: `${colWidth}px` }">
-                        {{ image.title }}
-                      </div>
-                      <div>{{ image.author.name }}</div>
-                      <div class="d-flex align-center ga-1">
-                        <span>#{{ image.id }}</span>
-                        <v-tooltip v-if="image.primary_color" location="top">
-                          <template v-slot:activator="{ props: tipProps }">
-                            <span v-bind="tipProps" class="color-swatch" :style="{
-                              backgroundColor: `rgb(${image.primary_color.rgb[0]}, ${image.primary_color.rgb[1]}, ${image.primary_color.rgb[2]})`,
-                            }"></span>
-                          </template>
-                          <div class="color-tooltip">
-                            <div>RGB: {{ image.primary_color.rgb.join(', ') }}</div>
-                            <div>LAB: {{ image.primary_color.lab.map(v => v.toFixed(1)).join(', ') }}</div>
-                          </div>
-                        </v-tooltip>
-                      </div>
+                    <div>{{ image.author.name }}</div>
+                    <div class="d-flex align-center ga-1">
+                      <span>#{{ image.id }}</span>
+                      <v-tooltip v-if="image.primary_color" location="top">
+                        <template v-slot:activator="{ props: tipProps }">
+                          <span v-bind="tipProps" class="color-swatch" :style="{
+                            backgroundColor: `rgb(${image.primary_color.rgb[0]}, ${image.primary_color.rgb[1]}, ${image.primary_color.rgb[2]})`,
+                          }"></span>
+                        </template>
+                        <div class="color-tooltip">
+                          <div>RGB: {{ image.primary_color.rgb.join(', ') }}</div>
+                          <div>LAB: {{ image.primary_color.lab.map(v => v.toFixed(1)).join(', ') }}</div>
+                        </div>
+                      </v-tooltip>
                     </div>
-                  </v-overlay>
-                </v-img>
-              </v-hover>
-            </template>
-          </v-col>
-        </v-row>
-      </div>
-      <template v-slot:empty>
-        <div class="text-medium-emphasis text-center pa-4">~ 到底儿了 ~</div>
-      </template>
-    </v-infinite-scroll>
+                  </div>
+                </v-overlay>
+              </v-img>
+            </v-hover>
+          </template>
+        </v-col>
+      </v-row>
+    </div>
+    <div ref="loadMoreRef" class="infinite-sentinel">
+      <v-progress-circular v-if="isLoadingImages && !is_empty" color="primary" indeterminate></v-progress-circular>
+      <div v-else-if="is_empty" class="text-medium-emphasis text-center pa-4">~ 到底儿了 ~</div>
+    </div>
   </v-container>
 
   <v-snackbar v-model="snackbar.show" :color="snackbar.color" timeout="3000" location="top">
@@ -508,6 +558,13 @@ const getTags = () => {
   flex-grow: 0;
   flex-shrink: 0;
   min-width: 0;
+}
+
+.infinite-sentinel {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+  min-height: 4rem;
 }
 
 .img-overlay {
@@ -586,6 +643,7 @@ const getTags = () => {
   width: 100%;
   max-height: 100vh;
   overflow: auto;
+  overscroll-behavior: contain;
 
   .container-cols {
     display: grid;

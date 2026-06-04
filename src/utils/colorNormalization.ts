@@ -15,6 +15,11 @@ export interface PaletteColor {
   lab: [number, number, number];
 }
 
+const isNumberTuple3 = (value: unknown): value is [number, number, number] =>
+  Array.isArray(value)
+  && value.length >= 3
+  && value.slice(0, 3).every(item => typeof item === 'number');
+
 /**
  * Normalize palette colors in-place for detail view:
  *   [{rgb:[r,g,b], lab:[l,a,b]}, ...] → {colors: [{rgb, lab}, ...]}
@@ -34,11 +39,13 @@ export function normalizeColorPalette(data: any): void {
  */
 export function normalizePrimaryColor(primaryColor: any): PrimaryColor | null {
   if (!primaryColor) return null
-  if (Array.isArray(primaryColor)) return { rgb: primaryColor as [number, number, number], lab: [0, 0, 0] }
+  if (isNumberTuple3(primaryColor)) return { rgb: primaryColor, lab: [0, 0, 0] }
   if (typeof primaryColor === 'object' && 'rgb' in primaryColor) {
+    if (!isNumberTuple3(primaryColor.rgb)) return null
+
     return {
-      rgb: primaryColor.rgb as [number, number, number],
-      lab: primaryColor.lab ? primaryColor.lab as [number, number, number] : [0, 0, 0],
+      rgb: primaryColor.rgb,
+      lab: isNumberTuple3(primaryColor.lab) ? primaryColor.lab : [0, 0, 0],
     }
   }
   return null
