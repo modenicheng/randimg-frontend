@@ -177,7 +177,7 @@ const createForm = ref({
   target_date_range:   [] as Date[],
   target_search_prompt: '',
   ranking_mode:       'day',
-  illust_type_filter: ['illust', 'manga', 'ugoira'] as string[],
+  illust_type_filter: ['illust'] as string[],
   max_pages:           0,
   discover_hops:       0,
   discover_seed_limit: 0,
