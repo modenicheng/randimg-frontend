@@ -70,16 +70,16 @@ const typeItems = [
   { title: '爬取：按用户', value: 'crawl:1' },
   { title: '爬取：按收藏', value: 'crawl:2' },
   { title: '爬取：按日榜', value: 'crawl:0' },
-  { title: '凭证更新', value: 'refresh-pixiv-token' },
+  { title: '凭证更新', value: 'refresh_pixiv_token' },
 ];
 
 /** Type filter items for subtask panels — subtasks are download/upload/etc, not crawl roots. */
 const subtaskTypeItems = [
   { title: '全部', value: null },
   { title: '下载', value: 'download' },
-  { title: '颜色提取', value: 'color-extract' },
+  { title: '颜色提取', value: 'color_extract' },
   { title: '上传', value: 'upload' },
-  { title: '合规检查', value: 'accessibility-check' },
+  { title: '合规检查', value: 'accessibility_check' },
   { title: '发现', value: 'discover' },
 ];
 
