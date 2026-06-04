@@ -34,6 +34,7 @@ interface SubtaskState {
   // Pagination
   total: number;
   page: number;
+  pageInput: number | null;
   pageSize: number;
 }
 
@@ -312,6 +313,7 @@ const fetchSubtasks = async (rootId: string, silent = false) => {
     if (res.status === 200) {
       let tasks = (res.data.tasks ?? []).map(parseTask);
       state.total = res.data.total ?? 0;
+      state.pageInput = state.page;
       // Apply client-side type filter if set
       if (state.filterType) {
         tasks = tasks.filter((t: Task) => t.taskType === state.filterType);
@@ -326,12 +328,39 @@ const fetchSubtasks = async (rootId: string, silent = false) => {
   }
 };
 
+const subtaskTotalPages = (state?: SubtaskState) =>
+  Math.max(1, Math.ceil((state?.total ?? 0) / (state?.pageSize || 1)));
+
+const normalizedSubtaskPage = (state: SubtaskState, value: number | null) => {
+  const totalPages = subtaskTotalPages(state);
+  const pageValue = Number(value);
+  if (!Number.isFinite(pageValue)) return state.page;
+  return Math.min(totalPages, Math.max(1, Math.trunc(pageValue)));
+};
+
 /** Handle subtask page change. */
 const onSubtaskPageChange = (rootId: string, newPage: number) => {
   const state = subtaskMap[rootId];
   if (!state) return;
-  state.page = newPage;
+  state.page = normalizedSubtaskPage(state, newPage);
+  state.pageInput = state.page;
   fetchSubtasks(rootId);
+};
+
+const jumpToSubtaskPage = (rootId: string) => {
+  const state = subtaskMap[rootId];
+  if (!state) return;
+  const nextPage = normalizedSubtaskPage(state, state.pageInput);
+  state.pageInput = nextPage;
+  if (nextPage === state.page) return;
+  state.page = nextPage;
+  fetchSubtasks(rootId);
+};
+
+const showSubtaskSection = (rootId: string) => {
+  const state = subtaskMap[rootId];
+  if (!state) return false;
+  return state.loading || state.total > 0 || state.items.length > 0 || !!state.filterType;
 };
 
 watch([filterType, filterStatus], () => {
@@ -355,7 +384,8 @@ const onRootExpandChange = (openIds: unknown) => {
         filterType: null,
         total: 0,
         page: 1,
-        pageSize: 50,
+        pageInput: 1,
+        pageSize: 10,
       };
       // Fire and forget (don't await so expansion happens instantly)
       nextTick(() => fetchSubtasks(id));
@@ -811,9 +841,9 @@ onUnmounted(() => {
               </v-btn>
             </div>
 
-            <v-divider v-if="(subtaskMap[root.id]?.items.length ?? 0) > 0" class="mb-4" />
+            <v-divider v-if="showSubtaskSection(root.id)" class="mb-4" />
 
-            <template v-if="(subtaskMap[root.id]?.items.length ?? 0) > 0">
+            <template v-if="showSubtaskSection(root.id)">
               <div class="d-flex align-center mb-3 ga-3 flex-wrap">
                 <span class="text-subtitle-2 font-weight-bold">子任务</span>
                 <span
@@ -826,27 +856,30 @@ onUnmounted(() => {
                   </template>
                 </span>
                 <v-spacer />
-                <v-select
-                  v-if="subtaskMap[root.id]"
-                  v-model="subtaskMap[root.id].filterType"
-                  :items="subtaskTypeItems"
-                  label="类型筛选"
-                  clearable
-                  density="compact"
-                  hide-details
-                  style="max-width: 160px;"
-                  @update:model-value="applySubtaskFilter(root.id)"
-                />
-                <v-btn
-                  v-if="subtaskMap[root.id] && pendingCount(subtaskMap[root.id].items) > 0"
-                  size="small"
-                  color="warning"
-                  variant="flat"
-                  @click="openInterruptSubtasks(root.id)"
-                >
-                  <v-icon size="16" class="mr-1" :icon="mdiCancel" />
-                  取消所有待处理子任务
-                </v-btn>
+                <div class="subtask-actions d-flex align-center ga-3 flex-wrap">
+                  <v-select
+                    v-if="subtaskMap[root.id]"
+                    v-model="subtaskMap[root.id].filterType"
+                    :items="subtaskTypeItems"
+                    label="类型筛选"
+                    chips
+                    density="compact"
+                    variant="underlined"
+                    hide-details
+                    class="subtask-type-select"
+                    @update:model-value="applySubtaskFilter(root.id)"
+                  />
+                  <v-btn
+                    v-if="subtaskMap[root.id] && pendingCount(subtaskMap[root.id].items) > 0"
+                    size="small"
+                    color="warning"
+                    variant="tonal"
+                    @click="openInterruptSubtasks(root.id)"
+                  >
+                    <v-icon size="16" class="mr-1" :icon="mdiCancel" />
+                    取消所有待处理子任务
+                  </v-btn>
+                </div>
               </div>
 
               <div v-if="subtaskMap[root.id]?.loading" class="py-2">
@@ -935,26 +968,44 @@ onUnmounted(() => {
               </v-expansion-panel>
             </v-expansion-panels>
 
-              <v-pagination
-                v-if="subtaskMap[root.id] && subtaskMap[root.id].total > subtaskMap[root.id].pageSize"
-                v-model="subtaskMap[root.id].page"
-                :length="Math.ceil(subtaskMap[root.id].total / subtaskMap[root.id].pageSize)"
-                rounded="circle"
-                density="compact"
-                class="mt-4"
-                @update:model-value="onSubtaskPageChange(root.id, $event)"
-              />
-            </template>
+                <div
+                  v-if="subtaskMap[root.id] && subtaskMap[root.id].total > subtaskMap[root.id].pageSize"
+                  class="subtask-pagination d-flex align-center justify-center ga-3 flex-wrap mt-4"
+                >
+                  <v-pagination
+                    :model-value="subtaskMap[root.id].page"
+                    :length="subtaskTotalPages(subtaskMap[root.id])"
+                    :total-visible="4"
+                    rounded="circle"
+                    density="compact"
+                    @update:model-value="onSubtaskPageChange(root.id, $event)"
+                  />
+                  <v-text-field
+                    v-model.number="subtaskMap[root.id].pageInput"
+                    type="number"
+                    label="跳转到"
+                    suffix="页"
+                    :min="1"
+                    :max="subtaskTotalPages(subtaskMap[root.id])"
+                    density="compact"
+                    variant="underlined"
+                    hide-details
+                    class="subtask-page-jump"
+                    @keydown.enter="jumpToSubtaskPage(root.id)"
+                    @blur="jumpToSubtaskPage(root.id)"
+                  />
+                </div>
+              </template>
 
-            <v-empty-state
-              v-else-if="subtaskMap[root.id]?.loaded"
-              :icon="mdiCheckboxBlankOutline"
-              title="暂无子任务"
-              text="该任务下还没有产生子任务。"
-              size="64"
-              min-height="180"
-              class="my-2"
-            />
+              <v-empty-state
+                v-else-if="subtaskMap[root.id]?.loaded && subtaskMap[root.id]?.filterType"
+                :icon="mdiCheckboxBlankOutline"
+                title="暂无匹配子任务"
+                text="当前筛选条件下没有子任务。"
+                size="64"
+                min-height="180"
+                class="my-2"
+              />
             </template>
           </v-expansion-panel-text>
         </v-expansion-panel>
@@ -1227,5 +1278,29 @@ onUnmounted(() => {
 }
 .subtask-panels .v-expansion-panel:last-child {
   border-bottom: none;
+}
+.subtask-actions {
+  margin-left: auto;
+}
+.subtask-type-select {
+  flex: 0 0 184px;
+}
+.subtask-pagination {
+  min-height: 40px;
+}
+.subtask-page-jump {
+  flex: 0 0 112px;
+}
+@media (max-width: 700px) {
+  .subtask-actions {
+    width: 100%;
+    margin-left: 0;
+  }
+  .subtask-type-select {
+    flex: 1 1 160px;
+  }
+  .subtask-page-jump {
+    flex: 0 1 112px;
+  }
 }
 </style>
