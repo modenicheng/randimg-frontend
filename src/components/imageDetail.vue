@@ -318,6 +318,7 @@ watch(() => props.imageId, () => {
   max-height: min(92vh, 64rem);
   overflow: auto;
   overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .detail-layout.is-wide-image {
@@ -340,6 +341,7 @@ watch(() => props.imageId, () => {
   justify-items: end;
   min-width: 0;
   padding: 0;
+  width: 100%;
 }
 
 .detail-image {
@@ -352,6 +354,7 @@ watch(() => props.imageId, () => {
 
 .info-panel {
   align-self: start;
+  container-type: inline-size;
   min-width: 20rem;
   padding: 1rem;
   max-height: 100%;
@@ -480,7 +483,17 @@ watch(() => props.imageId, () => {
   align-items: start;
   display: grid;
   gap: 1rem 1.25rem;
-  grid-template-columns: minmax(18rem, 1fr) minmax(14rem, auto);
+  grid-template-columns: minmax(0, 1fr) minmax(10rem, 0.72fr);
+}
+
+.extra-section {
+  min-width: 0;
+}
+
+@container (max-width: 30rem) {
+  .detail-extra-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .extra-section .section-label {
@@ -507,6 +520,16 @@ watch(() => props.imageId, () => {
   align-items: center;
   display: flex;
   gap: 0.75rem;
+  min-width: 0;
+}
+
+.primary-color-row > div {
+  min-width: 0;
+}
+
+.primary-color-row .text-body-2,
+.primary-color-row .text-caption {
+  overflow-wrap: anywhere;
 }
 
 .primary-color-swatch {
@@ -535,15 +558,18 @@ watch(() => props.imageId, () => {
 
 @media (max-width: 760px) {
   .detail-card {
+    --mobile-detail-width: calc(100vw - 1rem);
     max-height: calc(100dvh - 1rem);
-    max-width: calc(100vw - 1rem);
-    width: calc(100vw - 1rem);
+    max-width: var(--mobile-detail-width);
+    width: var(--mobile-detail-width);
   }
 
   .detail-layout,
   .detail-layout.is-wide-image {
     grid-template-columns: minmax(0, 1fr);
     max-height: calc(100dvh - 1rem);
+    scrollbar-gutter: auto;
+    width: 100%;
   }
 
   .detail-close-btn {

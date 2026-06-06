@@ -31,6 +31,7 @@ interface SubtaskState {
   loading: boolean;
   loaded: boolean;         // true after first load → only re-fetch on explicit action
   filterType: string | null;
+  filterStatus: string | null;
   // Pagination
   total: number;
   page: number;
@@ -42,9 +43,12 @@ const statusColor: Record<string, string> = {
   pending:          'blue',
   running:          'orange',
   completed:        'green',
-  failed:           'deep-purple',
+  failed:           'orange',
   killed:           'red',
   partial_success:  'amber',
+  queue:            'blue',
+  queued:           'blue',
+  done:             'green',
 };
 
 const statusLabel: Record<string, string> = {
@@ -54,6 +58,9 @@ const statusLabel: Record<string, string> = {
   failed:           '重试中',
   killed:           '失败',
   partial_success:  '部分成功',
+  queue:            '待处理',
+  queued:           '待处理',
+  done:             '已完成',
 };
 
 const jobLabel: Record<string, string> = {
@@ -64,6 +71,7 @@ const jobLabel: Record<string, string> = {
   accessibility_check: '合规检查',
   discover:            '发现',
   refresh_pixiv_token: '刷新Token',
+  cleanup:             '清理',
 };
 
 const typeItems = [
@@ -82,6 +90,11 @@ const subtaskTypeItems = [
   { title: '上传', value: 'upload' },
   { title: '合规检查', value: 'accessibility_check' },
   { title: '发现', value: 'discover' },
+  { title: '清理', value: 'cleanup' },
+  { title: '爬取：按用户', value: 'crawl:1' },
+  { title: '爬取：按收藏', value: 'crawl:2' },
+  { title: '爬取：按日榜', value: 'crawl:0' },
+  { title: '凭证更新', value: 'refresh_pixiv_token' },
 ];
 
 const statusItems = [
@@ -126,6 +139,30 @@ const seedMethodItems = [
 /** Sort priority: running → pending → retrying/failed → completed */
 const statusOrder: Record<string, number> = {
   running: 0, pending: 1, partial_success: 2, failed: 3, killed: 4, completed: 5,
+  queue: 1, queued: 1, done: 5,
+};
+
+const normalizeStatus = (status: string | null | undefined): string => {
+  switch (status) {
+    case 'done':
+      return 'completed';
+    case 'queue':
+    case 'queued':
+      return 'pending';
+    default:
+      return status ?? '';
+  }
+};
+
+const treeStatusParam = (status: string | null): string | null => {
+  switch (status) {
+    case 'completed':
+      return 'done';
+    case 'pending':
+      return 'queue';
+    default:
+      return status;
+  }
 };
 
 const rootTasks   = ref<Task[]>([]);
@@ -176,13 +213,36 @@ let pollTimer: ReturnType<typeof setInterval> | null = null;
 let pollRequestLocked = false;
 const POLL_INTERVAL = 5000; // 5 seconds
 
-const createForm = ref({
+type CrawlType = 0 | 1 | 2;
+
+interface CreateCrawlerForm {
+  crawl_type: CrawlType;
+  task_name: string;
+  target_user_id: string;
+  target_date_range: Date[];
+  target_search_prompt: string;
+  ranking_mode: string;
+  illust_type_filter: string[];
+  exclude_r18: boolean;
+  exclude_ai: boolean;
+  max_pages: number;
+  disable_discover: boolean;
+  discover_hops: number;
+  discover_seed_limit: number;
+  discover_seed_method: string;
+  credential_ids: number[];
+}
+
+const defaultCreateForm = (): CreateCrawlerForm => ({
   crawl_type:           1,
+  task_name:            '',
   target_user_id:      '',
   target_date_range:   [] as Date[],
   target_search_prompt: '',
   ranking_mode:       'day',
   illust_type_filter: ['illust'] as string[],
+  exclude_r18:         true,
+  exclude_ai:          true,
   max_pages:           0,
   disable_discover:    false,
   discover_hops:       0,
@@ -190,6 +250,8 @@ const createForm = ref({
   discover_seed_method: 'popularity',
   credential_ids:      [] as number[],
 });
+
+const createForm = ref<CreateCrawlerForm>(defaultCreateForm());
 
 /** Pixiv credentials for the credential selector. */
 interface PixivCred {
@@ -229,24 +291,30 @@ const sortedRoots = computed(() =>
 /** Derived: root IDs whose panels should be shown as expanded (for :model-value binding). */
 const expandedIds = computed(() => [...expandedRoots.value]);
 
-/** Parse a backend task object (snake_case) into our Task interface. */
-const parseTask = (raw: any): Task => ({
-  id:           raw.id,
-  taskType:     raw.task_type ?? '',
-  status:       raw.status,
-  rawStatus:    raw.raw_status,
-  retryCount:   raw.retry_count ?? 0,
-  createdAt:    raw.created_at ?? '',
-  updatedAt:    raw.updated_at,
-  completedAt:  raw.completed_at ?? null,
-  errorMessage: raw.error_message ?? null,
-  rootId:       raw.root_id ?? null,
-  crawlerId:    raw.crawler_id ?? null,
-  imageId:      raw.image_id ?? null,
-  payload:      raw.payload,
-  parent_job_id: raw.parent_job_id,
-  root_job_id:   raw.root_job_id,
-});
+/** Parse a backend task object into our Task interface. */
+const parseTask = (raw: any): Task => {
+  const task = raw?.job ?? raw ?? {};
+  const rawTaskStatus = task.status ?? raw?.status ?? '';
+  const status = normalizeStatus(rawTaskStatus);
+  const rawStatus = task.raw_status ?? task.rawStatus ?? raw?.raw_status ?? raw?.rawStatus;
+  return {
+    id:           task.id ?? raw?.id ?? '',
+    taskType:     task.task_type ?? task.taskType ?? task.job_type ?? task.jobType ?? '',
+    status:       status,
+    rawStatus:    rawStatus ?? (rawTaskStatus && rawTaskStatus !== status ? rawTaskStatus : undefined),
+    retryCount:   task.retry_count ?? task.retryCount ?? raw?.retry_count ?? raw?.retryCount ?? 0,
+    createdAt:    task.created_at ?? task.createdAt ?? raw?.created_at ?? raw?.createdAt ?? '',
+    updatedAt:    task.updated_at ?? task.updatedAt ?? raw?.updated_at ?? raw?.updatedAt,
+    completedAt:  task.completed_at ?? task.completedAt ?? raw?.completed_at ?? raw?.completedAt ?? null,
+    errorMessage: task.error_message ?? task.errorMessage ?? raw?.error_message ?? raw?.errorMessage ?? null,
+    rootId:       task.root_id ?? task.rootId ?? raw?.root_id ?? raw?.rootId ?? null,
+    crawlerId:    task.crawler_id ?? task.crawlerId ?? raw?.crawler_id ?? raw?.crawlerId ?? null,
+    imageId:      task.image_id ?? task.imageId ?? raw?.image_id ?? raw?.imageId ?? null,
+    payload:      task.payload ?? task.params ?? raw?.payload ?? raw?.params,
+    parent_job_id: task.parent_job_id ?? task.parentJobId ?? raw?.parent_job_id ?? raw?.parentJobId,
+    root_job_id:   task.root_job_id ?? task.rootJobId ?? raw?.root_job_id ?? raw?.rootJobId,
+  };
+};
 
 let fetchGeneration = 0;
 
@@ -303,21 +371,22 @@ const fetchSubtasks = async (rootId: string, silent = false) => {
   if (!silent) state.loading = true;
   try {
     const offset = (state.page - 1) * state.pageSize;
+    const params: Record<string, any> = {
+      flatten: true,
+      limit: state.pageSize,
+      offset: offset,
+    };
+    Object.assign(params, parseTypeFilter(state.filterType));
+    const status = treeStatusParam(state.filterStatus);
+    if (status) params.status = status;
+
     const res = await Axios.get(`/tasks/${rootId}/tree`, {
-      params: {
-        flatten: true,
-        limit: state.pageSize,
-        offset: offset,
-      }
+      params,
     });
     if (res.status === 200) {
-      let tasks = (res.data.tasks ?? []).map(parseTask);
+      const tasks = (res.data.tasks ?? []).map(parseTask);
       state.total = res.data.total ?? 0;
       state.pageInput = state.page;
-      // Apply client-side type filter if set
-      if (state.filterType) {
-        tasks = tasks.filter((t: Task) => t.taskType === state.filterType);
-      }
       state.items = tasks;
       state.loaded = true;
     }
@@ -360,7 +429,7 @@ const jumpToSubtaskPage = (rootId: string) => {
 const showSubtaskSection = (rootId: string) => {
   const state = subtaskMap[rootId];
   if (!state) return false;
-  return state.loading || state.total > 0 || state.items.length > 0 || !!state.filterType;
+  return state.loading || state.total > 0 || state.items.length > 0 || !!state.filterType || !!state.filterStatus;
 };
 
 watch([filterType, filterStatus], () => {
@@ -376,19 +445,23 @@ const onRootExpandChange = (openIds: unknown) => {
   const newSet = new Set(ids);
 
   for (const id of newSet) {
+    const root = rootTasks.value.find(t => t.id === id);
+    if (!root || !canHaveSubtasks(root)) continue;
+
     if (!subtaskMap[id]) {
       subtaskMap[id] = {
         items: [],
-        loading: false,
+        loading: true,
         loaded: false,
         filterType: null,
+        filterStatus: null,
         total: 0,
         page: 1,
         pageInput: 1,
         pageSize: 10,
       };
       // Fire and forget (don't await so expansion happens instantly)
-      nextTick(() => fetchSubtasks(id));
+      nextTick(() => fetchSubtasks(id, true));
     }
   }
 
@@ -404,7 +477,10 @@ const refreshSubtask = async (rootId: string) => {
 
 const applySubtaskFilter = (rootId: string) => {
   const state = subtaskMap[rootId];
-  if (state) state.page = 1;
+  if (state) {
+    state.page = 1;
+    state.pageInput = 1;
+  }
   fetchSubtasks(rootId);
 };
 
@@ -510,8 +586,7 @@ const confirmInterrupt = async () => {
     const params: Record<string, any> = {};
     const subFilter = subtaskMap[rootId]?.filterType;
     if (subFilter) {
-      const colonIdx = subFilter.indexOf(':');
-      params.task_type = colonIdx === -1 ? subFilter : subFilter.slice(0, colonIdx);
+      Object.assign(params, parseTypeFilter(subFilter));
     }
 
     const res = await Axios.delete(`/tasks/${rootId}/subtasks`, { params });
@@ -531,41 +606,69 @@ const confirmInterrupt = async () => {
   }
 };
 
-/** Format a Date to "YYYY-MM-DD" for the backend */
-const fmtDate = (d: Date) => d.toISOString().slice(0, 10);
+/** Format a Date to local "YYYY-MM-DD" for backend NaiveDateTime strings. */
+const fmtDate = (d: Date) => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 
 const submitCreate = async () => {
   const result = await createFormRef.value?.validate();
   if (!result?.valid) return;
-  // Bookmarks crawl (crawl_type=2) requires credential_ids
+
+  if (createForm.value.crawl_type === 0 && createForm.value.target_date_range.length < 2) {
+    snackbar.value = { show: true, text: '排行榜爬取必须选择起止日期', color: 'error' };
+    return;
+  }
+  if (createForm.value.crawl_type === 1 && !createForm.value.target_user_id.trim()) {
+    snackbar.value = { show: true, text: '用户爬取必须填写目标用户 ID', color: 'error' };
+    return;
+  }
   if (createForm.value.crawl_type === 2 && createForm.value.credential_ids.length === 0) {
     snackbar.value = { show: true, text: '收藏夹爬取必须选择至少一个 Pixiv 凭证', color: 'error' };
     return;
   }
+
   creating.value = true;
   try {
     const body: any = {
       crawl_type:  createForm.value.crawl_type,
     };
-    if (createForm.value.target_user_id)       body.target_user_id       = createForm.value.target_user_id;
+
+    if (createForm.value.task_name.trim()) {
+      body.task_name = createForm.value.task_name.trim();
+    }
+
+    if (createForm.value.crawl_type === 1) {
+      body.target_user_id = createForm.value.target_user_id.trim();
+    }
+
     // v-date-input range returns Date[]; backend expects NaiveDateTime "YYYY-MM-DDTHH:MM:SS"
     const range = createForm.value.target_date_range;
-    if (range.length >= 2) {
+    if (createForm.value.crawl_type === 0 && range.length >= 2) {
       body.target_start_date = fmtDate(range[0]) + 'T00:00:00';
-      body.target_end_date   = fmtDate(range[1]) + 'T00:00:00';
+      body.target_end_date   = fmtDate(range[range.length - 1]) + 'T23:59:59';
     }
-    if (createForm.value.target_search_prompt) body.target_search_prompt = createForm.value.target_search_prompt;
-    // 排名模式（排行爬取）
+
+    if (createForm.value.crawl_type === 2 && createForm.value.target_search_prompt.trim()) {
+      body.target_search_prompt = createForm.value.target_search_prompt.trim();
+    }
+
     if (createForm.value.crawl_type === 0 && createForm.value.ranking_mode) {
       body.ranking_mode = createForm.value.ranking_mode;
     }
-    // 图片类型过滤（所有爬取类型）
-    if (createForm.value.illust_type_filter.length > 0 && createForm.value.illust_type_filter.length < illustTypeFilterItems.length) {
+
+    if (createForm.value.illust_type_filter.length > 0) {
       body.illust_type_filter = createForm.value.illust_type_filter;
     }
-    // 页数限制
+
+    if (createForm.value.exclude_r18) body.exclude_r18 = true;
+    if (createForm.value.exclude_ai) body.exclude_ai = true;
+
     if (createForm.value.max_pages > 0) body.max_pages = createForm.value.max_pages;
-    // Discover 参数
+
     if (createForm.value.disable_discover) {
       body.disable_discover = true;
     } else {
@@ -575,14 +678,15 @@ const submitCreate = async () => {
         body.discover_seed_method = createForm.value.discover_seed_method;
       }
     }
-    // 凭证选择
+
     if (createForm.value.credential_ids.length > 0) {
       body.credential_ids = createForm.value.credential_ids;
     }
 
     await Axios.post('/crawler', body);
     createDialog.value = false;
-    createForm.value.target_date_range = [];
+    createForm.value = defaultCreateForm();
+    createFormRef.value?.resetValidation();
     snackbar.value = { show: true, text: '爬取任务已提交', color: 'success' };
     await fetchRoots();
   } catch (e: any) {
@@ -611,6 +715,9 @@ const taskTitle = (t: Task): string => {
   else if (t.payload?.credential_id)                 hint = `credential #${t.payload.credential_id}`;
   return label + (hint ? ': ' + hint : '');
 };
+
+const canHaveSubtasks = (task: Task): boolean =>
+  stripJobTypePrefix(task.taskType) === 'crawl';
 
 
 const formatJson = (v: any): string => {
@@ -679,7 +786,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <v-container>
+  <v-container class="task-manager-page">
 
     <v-row align="center" class="mb-4">
       <v-col>
@@ -861,12 +968,28 @@ onUnmounted(() => {
                     v-if="subtaskMap[root.id]"
                     v-model="subtaskMap[root.id].filterType"
                     :items="subtaskTypeItems"
+                    item-title="title"
+                    item-value="value"
                     label="类型筛选"
                     chips
                     density="compact"
                     variant="underlined"
                     hide-details
                     class="subtask-type-select"
+                    @update:model-value="applySubtaskFilter(root.id)"
+                  />
+                  <v-select
+                    v-if="subtaskMap[root.id]"
+                    v-model="subtaskMap[root.id].filterStatus"
+                    :items="statusItems"
+                    item-title="title"
+                    item-value="value"
+                    label="状态筛选"
+                    chips
+                    density="compact"
+                    variant="underlined"
+                    hide-details
+                    class="subtask-status-select"
                     @update:model-value="applySubtaskFilter(root.id)"
                   />
                   <v-btn
@@ -976,7 +1099,6 @@ onUnmounted(() => {
                     :model-value="subtaskMap[root.id].page"
                     :length="subtaskTotalPages(subtaskMap[root.id])"
                     :total-visible="4"
-                    rounded="circle"
                     density="compact"
                     @update:model-value="onSubtaskPageChange(root.id, $event)"
                   />
@@ -998,7 +1120,7 @@ onUnmounted(() => {
               </template>
 
               <v-empty-state
-                v-else-if="subtaskMap[root.id]?.loaded && subtaskMap[root.id]?.filterType"
+                v-else-if="subtaskMap[root.id]?.loaded && (subtaskMap[root.id]?.filterType || subtaskMap[root.id]?.filterStatus)"
                 :icon="mdiCheckboxBlankOutline"
                 title="暂无匹配子任务"
                 text="当前筛选条件下没有子任务。"
@@ -1025,7 +1147,6 @@ onUnmounted(() => {
         :length="totalPages"
         :total-visible="5"
         :disabled="loading"
-        rounded="circle"
         @update:model-value="() => fetchRoots()"
       />
       <span class="text-caption text-medium-emphasis mt-1">
@@ -1033,12 +1154,17 @@ onUnmounted(() => {
       </span>
     </div>
 
-    <v-dialog v-model="createDialog" max-width="520">
+    <v-dialog v-model="createDialog" max-width="560">
       <v-card>
         <v-card-title>创建爬取任务</v-card-title>
         <v-card-text>
           <v-form ref="createFormRef" class="d-flex flex-column ga-2" @submit.prevent="submitCreate">
             <v-select v-model="createForm.crawl_type" :items="crawlTypeItems" item-title="title" item-value="value" label="爬取类型" :rules="requiredRule" hide-details="auto" />
+            <v-text-field
+              v-model="createForm.task_name"
+              label="任务名称（可选）"
+              hide-details="auto"
+            />
             <v-text-field
               v-if="createForm.crawl_type === 1"
               v-model="createForm.target_user_id"
@@ -1054,7 +1180,12 @@ onUnmounted(() => {
               :rules="requiredRule"
               hide-details="auto"
             />
-            <v-text-field v-model="createForm.target_search_prompt" :label="createForm.crawl_type === 2 ? '标签过滤（可选）' : '搜索关键词（可选）'" hide-details="auto" />
+            <v-text-field
+              v-if="createForm.crawl_type === 2"
+              v-model="createForm.target_search_prompt"
+              label="书签标签过滤（可选）"
+              hide-details="auto"
+            />
 
             <!-- 凭证选择：收藏夹爬取必填，其他类型可选 -->
             <v-select
@@ -1064,6 +1195,7 @@ onUnmounted(() => {
               item-value="id"
               label="Pixiv 凭证"
               :required="createForm.crawl_type === 2"
+              :rules="createForm.crawl_type === 2 ? requiredRule : []"
               multiple
               chips
               closable-chips
@@ -1087,6 +1219,22 @@ onUnmounted(() => {
                   {{ item.title }}
                 </v-chip>
               </v-chip-group>
+            </div>
+            <div class="d-flex flex-wrap ga-3">
+              <v-switch
+                v-model="createForm.exclude_r18"
+                label="排除 R18"
+                color="primary"
+                density="compact"
+                hide-details
+              />
+              <v-switch
+                v-model="createForm.exclude_ai"
+                label="排除 AI 生成"
+                color="primary"
+                density="compact"
+                hide-details
+              />
             </div>
             <v-text-field v-model.number="createForm.max_pages" label="最大页数（0=不限）" type="number" min="0" hide-details="auto" />
 
@@ -1204,7 +1352,7 @@ onUnmounted(() => {
           <template v-if="interruptId && subtaskMap[interruptId]?.filterType">
             <br />
             <strong>当前类型筛选：</strong>
-            {{ typeItems.find(i => i.value === subtaskMap[interruptId!]?.filterType)?.title ?? subtaskMap[interruptId!]?.filterType }}
+            {{ subtaskTypeItems.find(i => i.value === subtaskMap[interruptId!]?.filterType)?.title ?? subtaskMap[interruptId!]?.filterType }}
           </template>
           <br />确定继续吗？
         </v-card-text>
@@ -1229,9 +1377,24 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.task-manager-page {
+  align-self: stretch;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: calc(100vh - var(--v-layout-top, 64px));
+  overflow: hidden;
+  padding-bottom: 0;
+}
+
+.task-manager-page > .v-row {
+  flex: 0 0 auto;
+}
+
 .task-scroll-container {
   --scroll-bg: rgb(var(--v-theme-surface));
-  max-height: 70vh;
+  flex: 1 1 0;
+  min-height: 0;
   overflow-y: auto;
   background:
     linear-gradient(var(--scroll-bg) 30%, transparent),
@@ -1285,8 +1448,17 @@ onUnmounted(() => {
 .subtask-type-select {
   flex: 0 0 184px;
 }
+.subtask-status-select {
+  flex: 0 0 144px;
+}
 .subtask-pagination {
   min-height: 40px;
+}
+.subtask-pagination :deep(.v-pagination__item .v-btn__content) {
+  font-size: clamp(0.6875rem, 2.2vw, 0.875rem);
+  line-height: 1;
+  letter-spacing: 0;
+  max-width: 100%;
 }
 .subtask-page-jump {
   flex: 0 0 112px;
@@ -1298,6 +1470,9 @@ onUnmounted(() => {
   }
   .subtask-type-select {
     flex: 1 1 160px;
+  }
+  .subtask-status-select {
+    flex: 1 1 140px;
   }
   .subtask-page-jump {
     flex: 0 1 112px;

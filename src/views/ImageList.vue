@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import Axios from "../axios/axios";
+import { isAxiosError } from "axios";
 import { onMounted, onUnmounted, ref, nextTick } from 'vue';
 import { useUserStore } from "../store/store";
 import { mdiFilterOutline } from "@mdi/js";
@@ -12,6 +13,17 @@ const store = useUserStore()
 const snackbar = ref({ show: false, text: '', color: 'error' })
 const showError = (text: string) => {
   snackbar.value = { show: true, text, color: 'error' }
+}
+const getRequestErrorMessage = (error: unknown, fallback: string) => {
+  if (isAxiosError(error)) {
+    const data = error.response?.data;
+    if (data && typeof data === 'object' && 'message' in data) {
+      const message = (data as { message?: unknown }).message;
+      if (typeof message === 'string' && message) return message;
+    }
+    if (typeof data === 'string' && data) return data;
+  }
+  return fallback;
 }
 
 interface imageObject {
@@ -32,29 +44,108 @@ interface requestParams {
   tags?: string[];
   author?: string | number;
   desc?: boolean;
+  sort_by?: string;
   ratioRange?: [number, number];
+  width_floor?: number | string | null;
+  width_ceil?: number | string | null;
+  height_floor?: number | string | null;
+  height_ceil?: number | string | null;
+  colorEnabled?: boolean;
+  color?: string;
+  mode?: 'primary' | 'palette';
+  max_dist?: number | string | null;
   accessible?: boolean;
   inaccessible?: boolean;
 }
 
+const sortByItems = [
+  { title: 'ID', value: 'id' },
+  { title: '宽度', value: 'width' },
+  { title: '高度', value: 'height' },
+  { title: '宽高比', value: 'aspect_ratio' },
+  { title: '来源发布时间', value: 'source_created_at' },
+  { title: '入库时间', value: 'created_at' },
+  { title: '热度', value: 'popularity' },
+  { title: '颜色距离', value: 'distance' },
+];
+
+const colorModeItems = [
+  { title: '主色', value: 'primary' },
+  { title: '调色盘', value: 'palette' },
+];
+
 
 let is_empty = ref(false);
 
-let params = ref<requestParams>({
+const createDefaultParams = (): requestParams => ({
   ratioRange: [0, 10],
   accessible: true,
   inaccessible: true,
+  sort_by: 'id',
+  colorEnabled: false,
+  color: '#ff0000',
+  mode: 'primary',
+  max_dist: 1500,
   desc: true,
   offset: 0,
-})
+});
+
+let params = ref<requestParams>(createDefaultParams())
 
 let limit = ref<number>(40);
 
 let allImages: imageObject[] = []
 let getImagesFuncLock = ref(false)
-const getImages = async () => {
-  if (getImagesFuncLock.value) return
+const loadError = ref<string | null>(null);
+let activeRequestGeneration: number | null = null;
+let listRequestGeneration = ref(0);
+
+const setNumberQueryParam = (queryParams: Record<string, any>, key: string, value: number | string | null | undefined) => {
+  if (value === null || value === undefined || value === '') return;
+  const numericValue = typeof value === 'number' ? value : Number(value);
+  if (Number.isFinite(numericValue)) {
+    queryParams[key] = numericValue;
+  }
+};
+
+const colorToRgbQuery = (color: string | undefined) => {
+  if (!color) return null;
+  const normalized = color.trim();
+  const rgbMatch = normalized.match(/^rgb\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)$/i)
+    ?? normalized.match(/^(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})$/);
+
+  if (rgbMatch) {
+    const values = rgbMatch.slice(1, 4).map(value => Number.parseInt(value, 10));
+    if (values.every(value => value >= 0 && value <= 255)) {
+      return values.join(',');
+    }
+    return null;
+  }
+
+  const hex = normalized.startsWith('#') ? normalized.slice(1) : normalized;
+  const fullHex = hex.length === 3
+    ? hex.split('').map(value => value + value).join('')
+    : hex.slice(0, 6);
+
+  if (!/^[0-9a-fA-F]{6}$/.test(fullHex)) return null;
+
+  const r = Number.parseInt(fullHex.slice(0, 2), 16);
+  const g = Number.parseInt(fullHex.slice(2, 4), 16);
+  const b = Number.parseInt(fullHex.slice(4, 6), 16);
+  return `${r},${g},${b}`;
+};
+
+const colorInputToCss = (color: string | undefined) => {
+  const rgb = colorToRgbQuery(color);
+  return rgb ? `rgb(${rgb})` : 'transparent';
+};
+
+const hasColorFilter = () => Boolean(params.value.colorEnabled && colorToRgbQuery(params.value.color));
+
+const getImages = async (generation = listRequestGeneration.value): Promise<boolean> => {
+  if (getImagesFuncLock.value && activeRequestGeneration === generation) return false
   getImagesFuncLock.value = true
+  activeRequestGeneration = generation
   let tagQuery
   if (params.value.tags?.length) {
     tagQuery = params.value.tags.join(",");
@@ -70,14 +161,29 @@ const getImages = async () => {
   };
   if (tagQuery) queryParams.tags = tagQuery;
   if (params.value.author) queryParams.author = params.value.author;
+  if (params.value.sort_by && (params.value.sort_by !== 'distance' || hasColorFilter())) {
+    queryParams.sort_by = params.value.sort_by;
+  }
   if (params.value.ratioRange) {
     queryParams.ratio_floor = params.value.ratioRange[0];
     queryParams.ratio_ceil = params.value.ratioRange[1];
   }
+  setNumberQueryParam(queryParams, 'width_floor', params.value.width_floor);
+  setNumberQueryParam(queryParams, 'width_ceil', params.value.width_ceil);
+  setNumberQueryParam(queryParams, 'height_floor', params.value.height_floor);
+  setNumberQueryParam(queryParams, 'height_ceil', params.value.height_ceil);
+  const rgbQuery = colorToRgbQuery(params.value.color);
+  if (params.value.colorEnabled && rgbQuery) queryParams.rgb = rgbQuery;
+  if (hasColorFilter()) {
+    if (params.value.mode) queryParams.mode = params.value.mode;
+    setNumberQueryParam(queryParams, 'max_dist', params.value.max_dist);
+  }
   if (params.value.accessible !== params.value.inaccessible) {
     queryParams.accessible = params.value.accessible;
   }
-  await Axios.get('/list', { params: queryParams }).then((res) => {
+  try {
+    const res = await Axios.get('/list', { params: queryParams });
+    if (generation !== listRequestGeneration.value) return false;
     if (res.status === 200) {
       if (res.data) {
         const mapped = res.data.map((img: any) => ({
@@ -97,12 +203,20 @@ const getImages = async () => {
 
       }
     }
-    getImagesFuncLock.value = false
+    loadError.value = null;
+    return true;
+  } catch (error) {
+    if (generation !== listRequestGeneration.value) return false;
+    const message = getRequestErrorMessage(error, '加载图片列表失败');
+    loadError.value = message;
+    showError(message);
+    return false;
+  } finally {
+    if (activeRequestGeneration === generation) {
+      getImagesFuncLock.value = false
+      activeRequestGeneration = null
+    }
   }
-  ).catch((e) => {
-    getImagesFuncLock.value = false
-    showError(e.response?.data?.message ?? '加载图片列表失败')
-  });
 };
 
 type ElementRef = HTMLElement | { $el?: HTMLElement } | null;
@@ -150,6 +264,7 @@ let resizeObserver: ResizeObserver | null = null;
 let drawerObserver: MutationObserver | null = null;
 let infiniteObserver: IntersectionObserver | null = null;
 let scrollCheckFrame: number | null = null;
+let loadMoreFrame: number | null = null;
 
 const getNaturalColumnWidth = () => getClampedColumnWidth();
 const getColumnOuterWidth = () => colWidth.value + COLUMN_OUTER_GAP;
@@ -228,20 +343,33 @@ const isLoadMoreVisible = () => {
   return rect.top <= window.innerHeight + 400 && rect.bottom >= -400;
 };
 
-const ensureLoadMore = async () => {
-  if (isLoadingImages.value || is_empty.value) return;
+const ensureLoadMore = async (options: { force?: boolean; reload?: boolean } = {}) => {
+  if (isLoadingImages.value && !options.reload) return;
+  if (is_empty.value && !options.reload) return;
+  if (loadError.value && !options.force && !options.reload) return;
+  if (options.force || options.reload) loadError.value = null;
 
   isLoadingImages.value = true;
-  await getImages();
+  const generation = listRequestGeneration.value;
+  const loaded = await getImages(generation);
   await nextTick();
   updateWaterfallFrameHeight();
-  isLoadingImages.value = false;
+  if (generation === listRequestGeneration.value) {
+    isLoadingImages.value = false;
+  }
+  if (!loaded) return;
 
-  requestAnimationFrame(() => {
-    if (!is_empty.value && isLoadMoreVisible()) {
+  if (loadMoreFrame !== null) cancelAnimationFrame(loadMoreFrame);
+  loadMoreFrame = requestAnimationFrame(() => {
+    loadMoreFrame = null;
+    if (!is_empty.value && !loadError.value && isLoadMoreVisible()) {
       ensureLoadMore();
     }
   });
+};
+
+const retryLoadMore = () => {
+  ensureLoadMore({ force: true });
 };
 
 const observeLoadMore = () => {
@@ -315,6 +443,7 @@ onUnmounted(() => {
   removeEventListener("scroll", checkLoadMoreOnScroll);
   if (resizeTimeout) clearTimeout(resizeTimeout);
   if (scrollCheckFrame !== null) cancelAnimationFrame(scrollCheckFrame);
+  if (loadMoreFrame !== null) cancelAnimationFrame(loadMoreFrame);
   resizeObserver?.disconnect();
   drawerObserver?.disconnect();
   infiniteObserver?.disconnect();
@@ -361,22 +490,38 @@ let isUpdating = ref(false);
 const filterUpdate = async () => {
   if (isUpdating.value) return
   isUpdating.value = true
-  clear()
+  resetImageList()
   if (params.value.offset !== undefined) {
     currentOffset.value = params.value.offset as number
   } else {
     currentOffset.value = 0
   }
-  await ensureLoadMore()
+  await ensureLoadMore({ reload: true })
   updateWaterfallFrameHeight()
   await nextTick()
   isUpdating.value = false
   updateWaterfallFrameHeight()
 }
-const clear = () => {
+
+const resetFilters = async () => {
+  if (isUpdating.value) return
+  params.value = createDefaultParams()
+  selectionTags.value = []
+  await filterUpdate()
+}
+
+const resetImageList = () => {
+  listRequestGeneration.value += 1
   allImages = []
   cols.value = Array.from({ length: columnCount.value }, () => []);
   currentOffset.value = 0
+  is_empty.value = false
+  isLoadingImages.value = false
+  loadError.value = null
+  if (loadMoreFrame !== null) {
+    cancelAnimationFrame(loadMoreFrame)
+    loadMoreFrame = null
+  }
   updateWaterfallFrameHeight()
 }
 let tags = ref<TagCatalogEntry[]>([]);
@@ -402,36 +547,72 @@ const getTags = () => {
     </template>
     <template v-slot:default="{ isActive }">
       <v-card class="filter-card">
-        <div class="text-h6 font-weight-bold">筛选条件</div>
-        <v-divider style="margin: 0.5rem 0"></v-divider>
-        <v-form>
-          <v-slider :step="1" :min="0" :max="totalImages" thumb-label label="查询起始偏移/Offset" v-model="params.offset">
+        <v-card-title class="filter-card-title">
+          筛选条件
+        </v-card-title>
+        <v-divider></v-divider>
+        <v-form class="filter-form">
+          <v-slider class="filter-slider" :step="1" :min="0" :max="totalImages" thumb-label
+            label="查询起始偏移/Offset" v-model="params.offset" hide-details>
             <template v-slot:append>
-              <v-text-field label="查询起始偏移/Offset" v-model="params.offset" density="compact" style="width: 6rem" type="number" hide-details
-                single-line></v-text-field>
+              <v-text-field label="查询起始偏移/Offset" v-model="params.offset" density="compact"
+                class="offset-field" type="number" hide-details single-line></v-text-field>
             </template>
 
           </v-slider>
           <v-autocomplete :loading="tagSelectorLoading" closable-chips clearable chips multiple label="标签/Tags"
             v-model="selectionTags" :items="tags" item-title="search_string" item-value="name"
-            @update:model-value="params.tags = $event">
+            density="comfortable" hide-details="auto" @update:model-value="params.tags = $event">
             <template v-slot:item="{ props, item }">
               <v-list-item v-bind="props" :subtitle="item.raw.translated_name" :title="item.raw.name"></v-list-item>
             </template>
           </v-autocomplete>
-          <v-text-field v-model="params.author" label="作者/Author" />
-          <v-range-slider thumb-label min="0" max="10" v-model="params.ratioRange" strict
-            label="宽高比/Ratio Range"></v-range-slider>
-          <v-checkbox v-model="params.desc" label="倒序排列"></v-checkbox>
-          <template v-if='store.user.token'>
-            <v-checkbox v-model="params.accessible" label="Accessible"></v-checkbox>
-            <v-checkbox v-model="params.inaccessible" label="Inaccessible"></v-checkbox>
-          </template>
+          <v-text-field v-model="params.author" label="作者/Author" density="comfortable" hide-details="auto" />
+          <v-select v-model="params.sort_by" :items="sortByItems" item-title="title" item-value="value"
+            label="排序字段/Sort By" density="comfortable" hide-details="auto"></v-select>
+          <v-range-slider class="filter-slider" thumb-label min="0" max="10" v-model="params.ratioRange" strict
+            label="宽高比/Ratio Range" hide-details></v-range-slider>
+          <div class="filter-grid">
+            <v-text-field v-model="params.width_floor" label="最小宽度" type="number" min="0"
+              density="comfortable" hide-details="auto" />
+            <v-text-field v-model="params.width_ceil" label="最大宽度" type="number" min="0"
+              density="comfortable" hide-details="auto" />
+            <v-text-field v-model="params.height_floor" label="最小高度" type="number" min="0"
+              density="comfortable" hide-details="auto" />
+            <v-text-field v-model="params.height_ceil" label="最大高度" type="number" min="0"
+              density="comfortable" hide-details="auto" />
+          </div>
+          <v-checkbox v-model="params.colorEnabled" label="按颜色筛选" density="compact" hide-details></v-checkbox>
+          <div v-if="params.colorEnabled" class="color-picker-filter">
+            <v-select v-model="params.mode" :items="colorModeItems" item-title="title" item-value="value"
+              label="匹配模式" density="comfortable" hide-details="auto" />
+            <v-menu :close-on-content-click="false" location="bottom end">
+              <template v-slot:activator="{ props: menuProps }">
+                <v-text-field v-model="params.color" v-bind="menuProps" label="目标颜色" variant="outlined"
+                  placeholder="#ff0000" density="comfortable" hide-details="auto">
+                  <template v-slot:append-inner>
+                    <span class="selected-color-swatch" :style="{ backgroundColor: colorInputToCss(params.color) }"></span>
+                  </template>
+                </v-text-field>
+              </template>
+              <v-color-picker v-model="params.color" hide-inputs mode="hex" width="320" />
+            </v-menu>
+            <v-slider v-model="params.max_dist" label="最大颜色距离" :min="0" :max="5000" :step="100"
+              thumb-label class="color-distance-slider filter-slider" hide-details></v-slider>
+          </div>
+          <div class="checkbox-grid">
+            <v-checkbox v-model="params.desc" label="倒序排列" density="compact" hide-details></v-checkbox>
+            <template v-if='store.user.token'>
+              <v-checkbox v-model="params.accessible" label="Accessible" density="compact" hide-details></v-checkbox>
+              <v-checkbox v-model="params.inaccessible" label="Inaccessible" density="compact" hide-details></v-checkbox>
+            </template>
+          </div>
         </v-form>
-        <v-card-actions>
+        <v-card-actions class="filter-actions">
           <v-spacer></v-spacer>
-          <v-btn text="应用" @click="filterUpdate()"></v-btn>
-          <v-btn text="确认" @click="filterUpdate(); isActive.value = false"></v-btn>
+          <v-btn text="重置" variant="text" :disabled="isUpdating" @click="resetFilters()" />
+          <v-btn text="应用" variant="text" :loading="isUpdating" @click="filterUpdate()" />
+          <v-btn text="确认" variant="text" :loading="isUpdating" @click="filterUpdate(); isActive.value = false" />
         </v-card-actions>
       </v-card>
     </template>
@@ -511,6 +692,10 @@ const getTags = () => {
     </div>
     <div ref="loadMoreRef" class="infinite-sentinel">
       <v-progress-circular v-if="isLoadingImages && !is_empty" color="primary" indeterminate></v-progress-circular>
+      <div v-else-if="loadError" class="load-error text-medium-emphasis">
+        <span>{{ loadError }}</span>
+        <v-btn size="small" variant="text" color="primary" @click="retryLoadMore">重试</v-btn>
+      </div>
       <div v-else-if="is_empty" class="text-medium-emphasis text-center pa-4">~ 到底儿了 ~</div>
     </div>
   </v-container>
@@ -565,6 +750,15 @@ const getTags = () => {
   display: flex;
   justify-content: center;
   min-height: 4rem;
+}
+
+.load-error {
+  align-items: center;
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+  min-height: 4rem;
+  text-align: center;
 }
 
 .img-overlay {
@@ -744,8 +938,66 @@ const getTags = () => {
 }
 
 .filter-card {
-  padding: 1rem;
+  overflow: hidden;
+}
 
+.filter-card-title {
+  padding: 0.75rem 1rem;
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.filter-actions {
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.5rem 1rem 0.75rem;
+}
+
+.filter-form {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1rem;
+}
+
+.filter-slider {
+  margin-inline: 0.25rem;
+}
+
+.offset-field {
+  width: 6rem;
+}
+
+.filter-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.color-picker-filter {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.color-distance-slider {
+  grid-column: 1 / -1;
+}
+
+.checkbox-grid {
+  align-items: center;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.25rem 0.75rem;
+  margin-top: -0.25rem;
+}
+
+.selected-color-swatch {
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.24);
+  border-radius: 0.2rem;
+  display: inline-block;
+  height: 1rem;
+  width: 1rem;
 }
 
 @media (max-width: 600px) {
@@ -756,6 +1008,22 @@ const getTags = () => {
   .fab {
     right: max(1rem, env(safe-area-inset-right));
     bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+
+  .filter-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .color-picker-filter {
+    grid-template-columns: 1fr;
+  }
+
+  .checkbox-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .filter-actions {
+    justify-content: flex-end;
   }
 }
 </style>
